@@ -141,9 +141,14 @@ test('createCtrlCGuard counts from the last Ctrl+C actually let through', () => 
 // Fake key bar: a container with buttons (dataset.key) and one listener list.
 function fakeBar(keys) {
     const listeners = {};
+    const listenerOptions = {};
     const bar = {
         parentNode: null,
-        addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+        addEventListener(type, fn, opts) {
+            (listeners[type] = listeners[type] || []).push(fn);
+            listenerOptions[type] = opts;
+        },
+        listenerOptions,
         fire(type, target) {
             const e = {
                 type, target, prevented: false,
@@ -195,6 +200,17 @@ test('installKeyBar keeps the focus in the terminal', () => {
     assert.equal(bar.fire('mousedown', bar.buttons.esc).prevented, true);
     // A tap on the bar's gap is not a key: leave it alone.
     assert.equal(bar.fire('pointerdown', bar).prevented, false);
+});
+
+// iOS Safari only applies :active to an element under a touch listener;
+// without it a tap shows no feedback and people tap ↑ or ↵ twice.
+test('installKeyBar listens for touchstart so iOS shows the tap', () => {
+    const bar = fakeBar(ALL_KEYS);
+    ui.installKeyBar(bar, () => fakeTerm());
+    assert.equal((bar.listeners.touchstart || []).length, 1);
+    assert.deepEqual(bar.listenerOptions.touchstart, { passive: true });
+    // It must not cancel anything: the click has to follow.
+    assert.equal(bar.fire('touchstart', bar.buttons.up).prevented, false);
 });
 
 test('installKeyBar finds the key from a child of the button', () => {

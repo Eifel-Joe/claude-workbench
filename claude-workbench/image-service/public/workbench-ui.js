@@ -141,6 +141,10 @@
         }
         bar.addEventListener('pointerdown', keepFocus);
         bar.addEventListener('mousedown', keepFocus);
+        // iOS Safari applies :active only under a touch listener; without the
+        // pressed look people tap twice, and ↑ / ↵ are not guarded. Passive and
+        // empty: it must not cancel the click that follows.
+        bar.addEventListener('touchstart', function () {}, { passive: true });
 
         bar.addEventListener('click', function (e) {
             var button = keyButton(e.target);

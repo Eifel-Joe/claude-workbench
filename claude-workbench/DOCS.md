@@ -225,7 +225,8 @@ The terminal starts directly in your `/config` directory, giving you immediate a
 ### Keyboard
 - **Shift+Enter** inserts a new line in Claude's input instead of sending it.
 - **Key bar on phones and tablets:** a row of keys above the on-screen
-  keyboard, shown on touch devices only. **Esc** cancels a reply or closes a
+  keyboard, shown on touch devices only (touchscreen laptops included).
+  **Esc** cancels a reply or closes a
   dialog, **↑ ↓ ↵** move through Claude's menus and questions (`/model`,
   `/resume`), **⇧Tab** switches the mode (normal, auto, plan), and **^C**
   stops a command in the shell. The on-screen keyboard stays open while you
