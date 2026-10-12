@@ -11,6 +11,9 @@
  * stays untouched. term.input() is xterm.js 5.4 (bundled with ttyd 1.7.7): it
  * goes out exactly like typed keys, unlike term.paste(), which would wrap the
  * text in bracketed-paste markers.
+ *
+ * Phone key bar: Esc, arrows, Enter, Shift+Tab and a guarded Ctrl+C, sent the
+ * same way (installKeyBar).
  */
 (function (root, factory) {
     'use strict';
@@ -109,11 +112,64 @@
         };
     }
 
+    var KEYBAR_FLAG = '__claudeKeyBarInstalled';
+
+    /**
+     * Wire the phone key bar. getTerm is asked on every tap: the ttyd frame
+     * reloads on reconnect and then has a new term. pointerdown and mousedown
+     * are cancelled so the tap does not move the focus out of the terminal -
+     * that would close the on-screen keyboard (and a tap with the keyboard
+     * closed must not open it).
+     */
+    function installKeyBar(bar, getTerm, options) {
+        if (!bar || bar[KEYBAR_FLAG]) return false;
+        bar[KEYBAR_FLAG] = true;
+        var opts = options || {};
+        var windowMs = opts.ctrlCWindowMs === undefined ? 2000 : opts.ctrlCWindowMs;
+        var allowCtrlC = createCtrlCGuard(opts.now, windowMs);
+        var later = opts.setTimeout || function (fn, ms) { return setTimeout(fn, ms); };
+
+        function keyButton(target) {
+            for (var el = target; el && el !== bar; el = el.parentNode) {
+                if (el.dataset && el.dataset.key) return el;
+            }
+            return null;
+        }
+
+        function keepFocus(e) {
+            if (keyButton(e.target)) e.preventDefault();
+        }
+        bar.addEventListener('pointerdown', keepFocus);
+        bar.addEventListener('mousedown', keepFocus);
+
+        bar.addEventListener('click', function (e) {
+            var button = keyButton(e.target);
+            if (!button) return;
+            var term = getTerm();
+            if (!term || typeof term.input !== 'function') return; // start page
+            var name = button.dataset.key;
+            var seq = keySequence(name, term);
+            if (seq === null) return;
+            if (name === 'ctrl-c') {
+                if (!allowCtrlC()) return;
+                button.textContent = 'wait';
+                button.classList.add('key-wait');
+                later(function () {
+                    button.textContent = '^C';
+                    button.classList.remove('key-wait');
+                }, windowMs);
+            }
+            term.input(seq, true);
+        });
+        return true;
+    }
+
     return {
         isShiftEnter: isShiftEnter,
         installShiftEnter: installShiftEnter,
         autoContinueLabel: autoContinueLabel,
         keySequence: keySequence,
-        createCtrlCGuard: createCtrlCGuard
+        createCtrlCGuard: createCtrlCGuard,
+        installKeyBar: installKeyBar
     };
 });
