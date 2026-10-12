@@ -26,10 +26,17 @@ Spalte **Empf.**: ✅ übernehmen · 🟡 prüfen/angepasst übernehmen · ❌ n
 | `Cache-Control: no-cache` für die Oberfläche | owine `67dd7e55` | ✅ 3.3.0 |
 | Sicherheits-Doku „jeder HA-User kann das Panel öffnen“ | umrath (heytcass `8e65403`) | ✅ 3.3.0 |
 | Shift+Enter, Auto-Continue nach Usage-Limit (Knopf, Befehl, Option) | mattbsea | ✅ 3.4.1 |
-| `claude_extra_args` (mattbsea, ToRa89, umrath, monxas), Mobil-Toolbar (mattbsea, weiting-tw), `working_directory` (owine, ToRa89, heman22union), `map: share/addons`, `permissions.deny` (Maheidem) | siehe Teile | offen |
-| ripgrep unter musl, Ingress-IP-Filter `172.30.32.2`, `watchdog:` | siehe Teile | offen, erst prüfen |
-| `persist-install` kopiert keine apk-Dateien | eigener Fund | offen (Folgepunkt 7) |
-| Log-Rauschen „Proxy error“ während des Starts (offener Terminal-Tab) | HA-Test 3.2.0 | offen |
+| Mobil-Toolbar Esc/Pfeile (Y/N) | mattbsea, weiting-tw (marcjay Shift+Tab) | offen, als Nächstes (2026-10-12) |
+| `map: share` / `addons` | Darrennchan8, mspnr, owine | offen, nur bei Bedarf (`/share` per Samba, lokale App-Entwicklung) |
+| ripgrep unter musl | siehe Teile | offen, erst prüfen (Grep in der App) |
+| Bremse nach erfolglosen Auto-Continue-Versuchen (Wochenlimit), Längengrenze für Limit-Zeilen | eigener Fund 3.4.1 | zurückgestellt, nur bei Nutzung von Auto-Continue |
+| `claude_extra_args`, `working_directory` | mattbsea, ToRa89, umrath, monxas, owine, heman22union | ❌ verworfen 2026-10-12: Modell per `/model` bzw. `~/.claude/settings.json`, Verzeichnis per `cd` |
+| `permissions.deny` als App-Option | Maheidem | ❌ verworfen 2026-10-12: in einer Minute selbst in `~/.claude/settings.json` eintragbar |
+| Boot-Smoke-Test in der CI | heytcass `d50e6c0` | ❌ verworfen 2026-10-12: HA-Test fängt dieselben Fehler |
+| Ingress-IP-Filter `172.30.32.2`, `watchdog:` | siehe Teile | ❌ verworfen 2026-10-12: kein Host-Port; Image-Service hat eigene Neustart-Schleife |
+| Log-Rauschen „Proxy error“ während des Starts, Auth-Helper-Pipe-Frage | HA-Test 3.2.0, eigener Fund | ❌ verworfen 2026-10-12: Kosmetik bzw. Login funktioniert in der Praxis |
+| `persist-install` kopiert keine apk-Dateien, API-Optionen, HA-MCP-Auto-Registrierung | eigener Fund, Moulbi, Maheidem, marcjay | ❌ verworfen 2026-10-12: mehrfach zurückgestellt, kein Bedarf |
+| LayerTM/claude-ha (Assist-Integration) mit Begleit-App ClaudeInHA | LayerTM | ❌ nicht einbauen (2026-10-11): verlangt Slug `*_claude-code` und eigenen Prompt-Server (ha-agent-core); höchstens als eigene App neben unserer |
 
 ---
 
