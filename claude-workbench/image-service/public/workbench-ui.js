@@ -69,9 +69,51 @@
             title: 'Auto-continue after a usage limit is on - click to switch it off' };
     }
 
+    // Phone key bar (index.html #key-bar): what each key sends, as xterm.js
+    // would for the real key. Arrows follow the terminal's cursor-key mode
+    // (DECCKM): full-screen programs switch to the SS3 form, so it is read on
+    // every tap (mattbsea's fork, commit ed215953).
+    var KEY_SEQUENCES = {
+        'esc': '\x1b',
+        'up': '\x1b[A',
+        'down': '\x1b[B',
+        'enter': '\r',
+        'shift-tab': '\x1b[Z',
+        'ctrl-c': '\x03'
+    };
+    var APP_CURSOR_SEQUENCES = { 'up': '\x1bOA', 'down': '\x1bOB' };
+
+    function keySequence(name, term) {
+        if (!Object.prototype.hasOwnProperty.call(KEY_SEQUENCES, name)) return null;
+        var appCursor = !!(term && term.modes && term.modes.applicationCursorKeysMode === true);
+        if (appCursor && Object.prototype.hasOwnProperty.call(APP_CURSOR_SEQUENCES, name)) {
+            return APP_CURSOR_SEQUENCES[name];
+        }
+        return KEY_SEQUENCES[name];
+    }
+
+    /**
+     * Two Ctrl+C in a row quit Claude Code, which ends the tmux session; on a
+     * phone a double tap is easy. Lets one through per window, counted from
+     * the last one let through.
+     */
+    function createCtrlCGuard(now, windowMs) {
+        var clock = now || Date.now;
+        var span = windowMs === undefined ? 2000 : windowMs;
+        var lastSent = null;
+        return function allow() {
+            var t = clock();
+            if (lastSent !== null && t - lastSent < span) return false;
+            lastSent = t;
+            return true;
+        };
+    }
+
     return {
         isShiftEnter: isShiftEnter,
         installShiftEnter: installShiftEnter,
-        autoContinueLabel: autoContinueLabel
+        autoContinueLabel: autoContinueLabel,
+        keySequence: keySequence,
+        createCtrlCGuard: createCtrlCGuard
     };
 });
