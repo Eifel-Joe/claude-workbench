@@ -28,6 +28,7 @@ This app provides a web-based terminal interface with Claude Code CLI pre-instal
 - **Home Assistant Integration**: Access directly from your dashboard
 - **Panel Icon**: Quick access from the sidebar with the code-braces-box icon
 - **Shift+Enter**: Inserts a new line in Claude's input instead of sending it
+- **Key Bar on Phones**: Esc, arrow keys, Enter, Shift+Tab and a guarded Ctrl+C above the on-screen keyboard
 - **Auto-Continue (opt-in)**: After a usage limit, types `continue` once the limit has reset; off by default, switchable from the panel header
 - **Multi-Architecture Support**: Works on amd64 and aarch64
 - **Secure Credential Management**: Persistent authentication with safe credential storage

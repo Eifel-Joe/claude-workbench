@@ -26,7 +26,7 @@ Spalte **Empf.**: ✅ übernehmen · 🟡 prüfen/angepasst übernehmen · ❌ n
 | `Cache-Control: no-cache` für die Oberfläche | owine `67dd7e55` | ✅ 3.3.0 |
 | Sicherheits-Doku „jeder HA-User kann das Panel öffnen“ | umrath (heytcass `8e65403`) | ✅ 3.3.0 |
 | Shift+Enter, Auto-Continue nach Usage-Limit (Knopf, Befehl, Option) | mattbsea | ✅ 3.4.1 |
-| Mobil-Toolbar Esc/Pfeile (Y/N) | mattbsea, weiting-tw (marcjay Shift+Tab) | offen, als Nächstes (2026-10-12) |
+| Mobil-Tastenleiste Esc, ↑, ↓, ↵, ⇧Tab, ^C (geschützt) | mattbsea, weiting-tw, marcjay | ✅ 3.5.0 |
 | `map: share` / `addons` | Darrennchan8, mspnr, owine | offen, nur bei Bedarf (`/share` per Samba, lokale App-Entwicklung) |
 | ripgrep unter musl | siehe Teile | offen, erst prüfen (Grep in der App) |
 | Bremse nach erfolglosen Auto-Continue-Versuchen (Wochenlimit), Längengrenze für Limit-Zeilen | eigener Fund 3.4.1 | zurückgestellt, nur bei Nutzung von Auto-Continue |

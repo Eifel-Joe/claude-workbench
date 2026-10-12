@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.5.0
+
+### ✨ New Feature - Key bar for phones
+- **Esc, ↑, ↓, ↵, ⇧Tab and ^C** in a row above the on-screen keyboard, on
+  touch devices only: cancel a reply, move through Claude's menus and
+  questions, switch the mode with Shift+Tab, stop a command in the shell
+  (mattbsea, mattbsea's heytcass fork, commit `ed215953`; weiting-tw
+  `fe0a4ec9`; marcjay `f6674b77`).
+- **The keyboard stays open** while you tap the keys.
+- **^C is guarded**: a second ^C within two seconds is not sent, because two
+  in a row quit Claude Code and end the session.
+
 ## 3.4.1
 
 ### 🐛 Bug Fix - Auto-continue waited a day for a reset that had just passed

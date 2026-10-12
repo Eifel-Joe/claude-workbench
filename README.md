@@ -1,6 +1,6 @@
 # Claude Workbench for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-3.4.1-1f6feb)](claude-workbench/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.5.0-1f6feb)](claude-workbench/CHANGELOG.md)
 [![Latest release](https://img.shields.io/github/v/release/Eifel-Joe/claude-workbench?label=release&color=1f6feb)](https://github.com/Eifel-Joe/claude-workbench/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 [![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-8957e5)](#architecture-support)
