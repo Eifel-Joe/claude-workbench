@@ -1,7 +1,7 @@
 ---
 name: "Claude Workbench"
 description: "Workbench for Anthropic's Claude Code CLI in Home Assistant: web terminal, persistent auth and packages, image paste, HA and GitHub CLIs"
-version: "3.4.1"
+version: "3.5.0"
 slug: "claude_workbench"
 init: false
 

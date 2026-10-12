@@ -308,6 +308,16 @@ test('the UI loads the panel helpers and has the auto-continue button', async ()
     assert.strictEqual(js.status, 200);
 });
 
+test('the UI has the phone key bar with all six keys', async () => {
+    const html = await (await fetch(`http://127.0.0.1:${PORT}/`)).text();
+    assert.match(html, /<div id="key-bar"/);
+    for (const key of ['esc', 'up', 'down', 'enter', 'shift-tab', 'ctrl-c']) {
+        assert.match(html, new RegExp(`data-key="${key}"`), key);
+    }
+    assert.match(html, /ClaudeWorkbenchUi\.installKeyBar\(/);
+    assert.match(html, /@media \(any-pointer: coarse\)/);
+});
+
 test('the UI is revalidated on every load (Cache-Control: no-cache)', async () => {
     // After an app update the browser must not combine a cached
     // terminal-clipboard.js with the new index.html (owine's fork, 67dd7e55).

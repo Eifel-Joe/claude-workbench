@@ -1,5 +1,34 @@
 # Sitzungsstand
 
+## 2026-10-12 (16) — Prod 3.4.1, claude-ha geprüft, PR-Weg, offene Punkte bereinigt
+
+### Stand
+- HA-Prod 2026-10-09 21:02 auf 3.4.1 (Supervisor „successfully updated“, Health-Check alle ✓,
+  keine `[auto-continue]`-Zeilen). `main` = `origin/main` = `c503a887`, alle Feature-Branches
+  lokal und auf GitHub gelöscht.
+- LayerTM/claude-ha geprüft (Assist-Integration „AI Agent“ mit Begleit-App LayerTM/ClaudeInHA):
+  nicht mit unserer App nutzbar – `engines.py` erkennt nur Slugs `*_claude-code`,
+  `config_flow.py` bricht sonst mit `unsupported_addon` ab, und die Integration braucht den
+  Prompt-Server aus „ha-agent-core“ (`/api/prompt`, `/api/status`, `/api/usage`,
+  `/api/account_limits`, Discovery, Option `api_token`). User macht Assist anders.
+- Offene Punkte bereinigt: verworfen mit Begründung in `docs/FORK-SURVEY-heytcass.md`
+  („Umsetzungsstand“); offen bleiben Mobil-Toolbar (als Nächstes), `map: share/addons` und
+  ripgrep-Prüfung bei Bedarf, Auto-Continue-Bremse nur bei Nutzung.
+
+### Verworfen
+- claude-ha in unsere App einbauen (Slug-Wechsel = neue App, ha-agent-core als Dauer-Abhängigkeit).
+
+### Fallen
+- Arbeitsweise neu (User 2026-10-12): eigene Änderungen über GitHub-PR (Text vorher freigeben,
+  CI am PR, Merge über GitHub). `DEVELOPMENT.md` gilt für externe Beitragende und bleibt
+  unverändert (Podman, `/tmp`).
+
+### Nächste Schritte
+- Mobil-Toolbar Esc/Pfeile: Ablauf nach Skill `task-loop` (Spec, Plan, je mit Freigabe).
+
+### Empfohlene Skills
+- `task-loop`, `superpowers:brainstorming`.
+
 ## 2026-10-09 (15) — 3.4.0/3.4.1 umgesetzt, HA-Test bestanden, v3.4.1 veröffentlicht
 
 ### Stand

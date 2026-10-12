@@ -105,6 +105,46 @@
             display: none;
         }
 
+        /* Phone key bar: touch devices only, the container's last row, so it
+           sits right above the on-screen keyboard (trackOnScreenKeyboard
+           sizes the container to the visible viewport). */
+        #key-bar {
+            display: none;
+            flex-shrink: 0;
+            gap: 4px;
+            padding: 4px;
+            background: #2d2d2d;
+            border-top: 1px solid #3d3d3d;
+        }
+
+        #key-bar button {
+            flex: 1;
+            height: 40px;
+            background: #3a3a3a;
+            color: #eee;
+            border: 1px solid #4a4a4a;
+            border-radius: 4px;
+            font-size: 15px;
+            font-family: inherit;
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        #key-bar button:active {
+            background: #007acc;
+        }
+
+        #key-bar button.key-wait {
+            color: #888;
+        }
+
+        @media (any-pointer: coarse) {
+            #key-bar {
+                display: flex;
+            }
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
@@ -495,6 +535,14 @@
                 <div id="drop-zone-text">Drop image here to upload</div>
             </div>
         </div>
+        <div id="key-bar" role="toolbar" aria-label="Terminal keys">
+            <button type="button" tabindex="-1" data-key="esc" aria-label="Escape">Esc</button>
+            <button type="button" tabindex="-1" data-key="up" aria-label="Arrow up">↑</button>
+            <button type="button" tabindex="-1" data-key="down" aria-label="Arrow down">↓</button>
+            <button type="button" tabindex="-1" data-key="enter" aria-label="Enter">↵</button>
+            <button type="button" tabindex="-1" data-key="shift-tab" aria-label="Shift+Tab">⇧Tab</button>
+            <button type="button" tabindex="-1" data-key="ctrl-c" aria-label="Ctrl+C">^C</button>
+        </div>
     </div>
     <input type="file" id="file-input" accept="image/*">
 
@@ -687,6 +735,16 @@
 
         refreshAutoContinue();
         setInterval(refreshAutoContinue, 30000);
+
+        // Phone key bar (public/workbench-ui.js): the terminal is looked up on
+        // every tap, the ttyd frame gets a new one after a reconnect.
+        ClaudeWorkbenchUi.installKeyBar(document.getElementById('key-bar'), () => {
+            try {
+                return document.getElementById('terminal-frame').contentWindow.term || null;
+            } catch {
+                return null;
+            }
+        });
 
         // Fixes mouse-selection copy and Claude Code's /copy (OSC 52) inside ttyd.
         let clipboardBridge = null;
