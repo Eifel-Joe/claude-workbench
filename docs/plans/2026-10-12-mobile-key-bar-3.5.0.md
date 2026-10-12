@@ -44,7 +44,7 @@
 - Produces: `keySequence(name: string, term: object|null) -> string|null`;
   `createCtrlCGuard(now?: () => number, windowMs?: number = 2000) -> () => boolean` (die zurückgegebene Funktion heißt `allow`).
 
-- [ ] **Step 1: Failing tests anhängen** – ans Ende von `tests/test-workbench-ui.js`:
+- [x] **Step 1: Failing tests anhängen** – ans Ende von `tests/test-workbench-ui.js`:
 
 ```js
 test('keySequence maps the six keys', () => {
@@ -94,12 +94,12 @@ test('createCtrlCGuard counts from the last Ctrl+C actually let through', () => 
 });
 ```
 
-- [ ] **Step 2: RED**
+- [x] **Step 2: RED**
 
 Run: `node --test --test-reporter=tap tests/test-workbench-ui.js`
 Expected: die 5 neuen Tests FAIL mit `ui.keySequence is not a function` bzw. `ui.createCtrlCGuard is not a function`; die 5 alten ok.
 
-- [ ] **Step 3: Implementierung** – in `workbench-ui.js` direkt vor `    return {` einfügen:
+- [x] **Step 3: Implementierung** – in `workbench-ui.js` direkt vor `    return {` einfügen:
 
 ```js
     // Phone key bar (index.html #key-bar): what each key sends, as xterm.js
@@ -156,12 +156,12 @@ Expected: die 5 neuen Tests FAIL mit `ui.keySequence is not a function` bzw. `ui
     };
 ```
 
-- [ ] **Step 4: GREEN**
+- [x] **Step 4: GREEN**
 
 Run: `node --test --test-reporter=tap tests/test-workbench-ui.js`
 Expected: `# pass 10`, `# fail 0`. Im Diff prüfen: `'\x1b'`, `'\x1b[A'`, `'\x03'` stehen genau so in der Datei.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add claude-workbench/image-service/public/workbench-ui.js tests/test-workbench-ui.js
@@ -180,7 +180,7 @@ git commit -m "feat: key sequences and a Ctrl+C guard for the phone key bar"
 - Consumes: `keySequence`, `createCtrlCGuard` (Task 1).
 - Produces: `installKeyBar(bar: Element, getTerm: () => object|null, options?: { now?, ctrlCWindowMs?, setTimeout? }) -> boolean` (`true` beim ersten Installieren, `false` sonst). Knöpfe tragen `data-key` mit den Namen aus Task 1.
 
-- [ ] **Step 1: Failing tests anhängen:**
+- [x] **Step 1: Failing tests anhängen:**
 
 ```js
 // Fake key bar: a container with buttons (dataset.key) and one listener list.
@@ -314,12 +314,12 @@ test('installKeyBar installs once per bar', () => {
 });
 ```
 
-- [ ] **Step 2: RED**
+- [x] **Step 2: RED**
 
 Run: `node --test --test-reporter=tap tests/test-workbench-ui.js`
 Expected: 7 neue Tests FAIL mit `ui.installKeyBar is not a function`; 10 ok.
 
-- [ ] **Step 3: Implementierung** – in `workbench-ui.js` nach `createCtrlCGuard` (vor `    return {`) einfügen:
+- [x] **Step 3: Implementierung** – in `workbench-ui.js` nach `createCtrlCGuard` (vor `    return {`) einfügen:
 
 ```js
     var KEYBAR_FLAG = '__claudeKeyBarInstalled';
@@ -393,14 +393,14 @@ Expected: 7 neue Tests FAIL mit `ui.installKeyBar is not a function`; 10 ok.
   ` * Phone key bar: Esc, arrows, Enter, Shift+Tab and a guarded Ctrl+C, sent the`
   ` * same way (installKeyBar).`
 
-- [ ] **Step 4: GREEN**
+- [x] **Step 4: GREEN**
 
 Run: `node --test --test-reporter=tap tests/test-workbench-ui.js && node tests/test-terminal-clipboard.js`
 Expected: `# pass 17`, `# fail 0`; Clipboard „All 100 clipboard bridge tests passed“.
 
-- [ ] **Step 5: Gegenprobe** – in `installKeyBar` `bar.addEventListener('mousedown', keepFocus);` vorübergehend auskommentieren (Edit-Tool): Test „keeps the focus“ muss FAIL. Zurück per Edit-Tool, wieder GREEN.
+- [x] **Step 5: Gegenprobe** – in `installKeyBar` `bar.addEventListener('mousedown', keepFocus);` vorübergehend auskommentieren (Edit-Tool): Test „keeps the focus“ muss FAIL. Zurück per Edit-Tool, wieder GREEN.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add claude-workbench/image-service/public/workbench-ui.js tests/test-workbench-ui.js
@@ -418,7 +418,7 @@ git commit -m "feat: installKeyBar wires the phone key bar to the terminal"
 **Interfaces:**
 - Consumes: `ClaudeWorkbenchUi.installKeyBar` (Task 2).
 
-- [ ] **Step 1: Failing test** – in `tests/test-image-service.js` nach dem Test `'the UI loads the panel helpers and has the auto-continue button'`:
+- [x] **Step 1: Failing test** – in `tests/test-image-service.js` nach dem Test `'the UI loads the panel helpers and has the auto-continue button'`:
 
 ```js
 test('the UI has the phone key bar with all six keys', async () => {
@@ -434,7 +434,7 @@ test('the UI has the phone key bar with all six keys', async () => {
 
 Run: `node --test --test-reporter=tap tests/test-image-service.js` → dieser Test FAIL.
 
-- [ ] **Step 2: CSS** – nach
+- [x] **Step 2: CSS** – nach
 
 ```css
         .header-btn .btn-short {
@@ -487,7 +487,7 @@ Run: `node --test --test-reporter=tap tests/test-image-service.js` → dieser Te
         }
 ```
 
-- [ ] **Step 3: Markup** – ersetzen
+- [x] **Step 3: Markup** – ersetzen
 
 ```html
                 <div id="drop-zone-text">Drop image here to upload</div>
@@ -513,7 +513,7 @@ Run: `node --test --test-reporter=tap tests/test-image-service.js` → dieser Te
     </div>
 ```
 
-- [ ] **Step 4: Aufruf** – nach der Zeile `        setInterval(refreshAutoContinue, 30000);` einfügen:
+- [x] **Step 4: Aufruf** – nach der Zeile `        setInterval(refreshAutoContinue, 30000);` einfügen:
 
 ```js
 
@@ -528,18 +528,18 @@ Run: `node --test --test-reporter=tap tests/test-image-service.js` → dieser Te
         });
 ```
 
-- [ ] **Step 5: GREEN + Syntax**
+- [x] **Step 5: GREEN + Syntax**
 
 Run: `node --test --test-reporter=tap tests/test-image-service.js` → alle Einzeltests ok (unter Windows ggf. der bekannte ECONNRESET-Fehlschlag auf Dateiebene; maßgeblich sind die Einzeltests).
 Syntax-Probe ohne Datei: `node -e "const h=require('fs').readFileSync('claude-workbench/image-service/public/index.html','utf8');const b=[...h.matchAll(/<script>([\s\S]*?)<\/script>/g)];new Function(b[b.length-1][1]);console.log('syntax ok')"` → `syntax ok`.
 
-- [ ] **Step 6: Lokale Sichtprüfung (Kriterium vorab: Desktop ohne Leiste, Mobil mit Leiste unten, sechs gleich breite Knöpfe)**
+- [x] **Step 6: Lokale Sichtprüfung (Kriterium vorab: Desktop ohne Leiste, Mobil mit Leiste unten, sechs gleich breite Knöpfe)**
 
   Image-Service im Hintergrund starten (Bash-Tool `run_in_background`):
   `cd claude-workbench/image-service && TMPDIR=… TMP=… TEMP=… IMAGE_SERVICE_PORT=17680 TTYD_PORT=17681 UPLOAD_DIR='D:\Entwicklung\Claude-Code-HA\.tmp\preview-img' AUTO_CONTINUE_DIR='D:\Entwicklung\Claude-Code-HA\.tmp\preview-ac' node server.js`
   Browser-Fenster: `http://localhost:17680/` → Screenshot Desktop (keine Leiste); `resize_window` Preset `mobile`, neu laden → Screenshot (Leiste unten). Danach Preset `desktop`, Server per **TaskStop** beenden (nicht per netstat – Windows meldet „ABHÖREN“), `.tmp/preview-img` und `.tmp/preview-ac` löschen, `.tmp` leer.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add claude-workbench/image-service/public/index.html tests/test-image-service.js
@@ -556,10 +556,10 @@ git commit -m "feat: phone key bar above the on-screen keyboard"
 - Create: `docs/release-notes-3.5.0.md`
 - Modify: `docs/FORK-SURVEY-heytcass.md` (Zeile „Mobil-Toolbar …“)
 
-- [ ] **Step 1: Version** – `config.yaml` `version: "3.4.1"` → `"3.5.0"`; Repo-`README.md` `version-3.4.1-` → `version-3.5.0-`.
+- [x] **Step 1: Version** – `config.yaml` `version: "3.4.1"` → `"3.5.0"`; Repo-`README.md` `version-3.4.1-` → `version-3.5.0-`.
   Run: `bash tests/test-release-metadata.sh` → FAIL, weil CHANGELOG noch keinen 3.5.0-Abschnitt hat (RED für Step 2).
 
-- [ ] **Step 2: CHANGELOG** – oben nach `# Changelog`:
+- [x] **Step 2: CHANGELOG** – oben nach `# Changelog`:
 
 ```markdown
 ## 3.5.0
@@ -577,7 +577,7 @@ git commit -m "feat: phone key bar above the on-screen keyboard"
 
   Run: `bash tests/test-release-metadata.sh` → „Release metadata suite passed (version 3.5.0)“.
 
-- [ ] **Step 3: DOCS.md** – Abschnitt `### Keyboard` ersetzen durch:
+- [x] **Step 3: DOCS.md** – Abschnitt `### Keyboard` ersetzen durch:
 
 ```markdown
 ### Keyboard
@@ -593,11 +593,11 @@ git commit -m "feat: phone key bar above the on-screen keyboard"
   through `/resume`).
 ```
 
-- [ ] **Step 4: App-README** – in `claude-workbench/README.md` nach der Zeile
+- [x] **Step 4: App-README** – in `claude-workbench/README.md` nach der Zeile
   `- **Shift+Enter**: Inserts a new line in Claude's input instead of sending it` einfügen:
   `- **Key Bar on Phones**: Esc, arrow keys, Enter, Shift+Tab and a guarded Ctrl+C above the on-screen keyboard`
 
-- [ ] **Step 5: Release-Notes** – `docs/release-notes-3.5.0.md`:
+- [x] **Step 5: Release-Notes** – `docs/release-notes-3.5.0.md`:
 
 ```markdown
 ## Key bar for phones
@@ -611,12 +611,12 @@ git commit -m "feat: phone key bar above the on-screen keyboard"
 The idea comes from mattbsea's fork of [heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons) (`ed215953`), with the key choice informed by weiting-tw (`fe0a4ec9`) and marcjay (`f6674b77`). Thank you! Full details: [CHANGELOG](https://github.com/Eifel-Joe/claude-workbench/blob/main/claude-workbench/CHANGELOG.md).
 ```
 
-- [ ] **Step 6: Survey** – in `docs/FORK-SURVEY-heytcass.md` die Zeile
+- [x] **Step 6: Survey** – in `docs/FORK-SURVEY-heytcass.md` die Zeile
   `| Mobil-Toolbar Esc/Pfeile (Y/N) | mattbsea, weiting-tw (marcjay Shift+Tab) | offen, als Nächstes (2026-10-12) |`
   ersetzen durch
   `| Mobil-Tastenleiste Esc, ↑, ↓, ↵, ⇧Tab, ^C (geschützt) | mattbsea, weiting-tw, marcjay | ✅ 3.5.0 |`
 
-- [ ] **Step 7: Prüfen und committen**
+- [x] **Step 7: Prüfen und committen**
 
 Run: `bash tests/test-release-metadata.sh && git ls-files --eol | grep -c "crlf\|mixed"` → passed (3.5.0), `0`.
 
@@ -630,7 +630,7 @@ git show --stat --oneline HEAD
 
 ### Task 5: Gesamtprüfung, Review, PR, CI, HA-Test, Release
 
-- [ ] **Step 1: Alle lokalen Suiten** (TMPDIR/TMP/TEMP auf `.tmp`):
+- [x] **Step 1: Alle lokalen Suiten** (TMPDIR/TMP/TEMP auf `.tmp`):
   `bash tests/test-release-metadata.sh`, `bash tests/test-persist-install.sh`, `bash tests/test-startup-timeouts.sh`,
   `bash tests/test-cpu-check.sh < /dev/null`, `bash tests/test-npm-cache.sh`, `bash tests/test-health-check.sh`,
   `bash tests/test-startup-order.sh`, `bash tests/test-claude-assets.sh`, `bash tests/test-auth-helper.sh`,
@@ -638,7 +638,7 @@ git show --stat --oneline HEAD
   `node tests/test-terminal-clipboard.js`, `node --test tests/test-workbench-ui.js`, `node --test tests/test-auto-continue.js`,
   `PATH="/c/WINDOWS/system32:$PATH" node --test tests/test-app-migration.js`,
   `node --test --test-reporter=tap tests/test-image-service.js`; ShellCheck wie die CI. Ausgaben zeigen.
-- [ ] **Step 2: Code-Review per Subagent** (Diff `c503a887..HEAD`, Spec, Plan), Befunde über `superpowers:receiving-code-review` prüfen, Fixes mit Test und eigenem Commit.
+- [x] **Step 2: Code-Review per Subagent** (Diff `c503a887..HEAD`, Spec, Plan), Befunde über `superpowers:receiving-code-review` prüfen, Fixes mit Test und eigenem Commit.
 - [ ] **Step 3: Push des Branches, PR-Text im Chat zeigen**, nach Freigabe `gh pr create --repo Eifel-Joe/claude-workbench --base main --head feat/mobile-toolbar`; danach `ccd_pr`-Tools (`get_status`, ggf. `bind_pr`) und CI am PR abwarten.
 - [ ] **Step 4: Merge über GitHub nach Freigabe**, dann HA-Test per MCP: `ha_manage_app check_updates`, dann `update`; App-Log prüfen.
 - [ ] **Step 5: Ende-zu-Ende auf HA-Test am echten Handy** laut Spec („Ende-zu-Ende-Kriterium“ Punkt 2): `/model` ↓↓↵, Esc bricht ab, ⇧Tab wechselt den Modus, ^C doppelt → Claude läuft weiter und Knopf zeigt „wait“, Tastatur bleibt offen; am PC keine Leiste. Ergebnis in `docs/SESSION-STAND.md`.
