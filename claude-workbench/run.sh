@@ -434,6 +434,91 @@ check_persisted_alpine_release() {
     fi
 }
 
+# The persist-install venv in /data belongs to the Python that created it. When
+# the base image brings a new one (Alpine 3.21's 3.12 -> 3.24's 3.14), its
+# packages stop importing and its own pip breaks, while venv/bin/python still
+# resolves - to the new interpreter. So: list what was installed by name (pip's
+# REQUESTED marker, the same rule as app-migration/apply.js; dependencies come
+# back with them; no marker at all means everything), write that list to
+# .reinstall-pending next to the venv, recreate the venv, then work the list
+# off. Whatever fails (no network at boot) stays on the list and is retried on
+# the next start, so an offline start does not lose the packages. Runs after
+# the panel is up and before the options' pip packages are installed. Adapted
+# from nsleigh (ESJavadex/claude-code-ha@a1f0f2da); the REQUESTED rule and the
+# retry list are our own (tests/test-alpine-migration.sh). PERSIST_VENV and
+# PYTHON_BIN are overridable for tests only.
+migrate_python_venv() {
+    local venv="${PERSIST_VENV:-/data/packages/python/venv}"
+    local python="${PYTHON_BIN:-python3}"
+    local pending="${venv%/*}/.reinstall-pending"
+    local old new meta name
+    local -a all=() requested=() list=() failed=()
+
+    if [ -f "$venv/pyvenv.cfg" ]; then
+        old=$(sed -n -E '/^version(_info)? *=/{s/^version(_info)? *= *([0-9]+\.[0-9]+).*/\2/p;q;}' \
+            "$venv/pyvenv.cfg") || old=''
+        new=$("$python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || new=''
+        if [ -n "$old" ] && [ -n "$new" ] && [ "$old" != "$new" ]; then
+            for meta in "$venv/lib/python$old/site-packages"/*.dist-info/METADATA; do
+                [ -f "$meta" ] || continue
+                name=$(sed -n '/^Name:/{s/^Name:[[:space:]]*//;p;q;}' "$meta" | tr -d '\r[:space:]') || name=''
+                case "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" in
+                    ''|pip|setuptools|wheel) continue ;;
+                esac
+                all+=("$name")
+                if [ -f "${meta%/METADATA}/REQUESTED" ]; then
+                    requested+=("$name")
+                fi
+            done
+            if [ "${#requested[@]}" -gt 0 ]; then
+                list=("${requested[@]}")
+            else
+                list=("${all[@]}")
+            fi
+            if [ "${#list[@]}" -gt 0 ] && ! printf '%s\n' "${list[@]}" >> "$pending" 2>/dev/null; then
+                bashio::log.error "Python changed from $old to $new, but the package list could not be saved to $pending; keeping the old venv"
+                return 0
+            fi
+            bashio::log.warning "Python changed from $old to $new: rebuilding the persist-install venv in $venv"
+            rm -rf "$venv"
+            if ! "$python" -m venv "$venv"; then
+                rm -rf "$venv"
+                bashio::log.error "Could not create the Python venv in $venv; its packages stay listed in $pending for the next start"
+                return 0
+            fi
+        fi
+    fi
+
+    [ -f "$pending" ] || return 0
+    if [ ! -x "$venv/bin/pip" ]; then
+        rm -rf "$venv"
+        if ! "$python" -m venv "$venv"; then
+            rm -rf "$venv"
+            bashio::log.error "Could not create the Python venv in $venv; its packages stay listed in $pending for the next start"
+            return 0
+        fi
+    fi
+
+    bashio::log.info "Reinstalling Python packages into the persist-install venv..."
+    while IFS= read -r name || [ -n "$name" ]; do
+        name=${name//[[:space:]]/}
+        [ -n "$name" ] || continue
+        bashio::log.info "  Reinstalling: $name"
+        # stdin from /dev/null: pip must not eat the rest of the list
+        run_with_timeout "$STARTUP_PIP_TIMEOUT" "Reinstall of $name" \
+            "$venv/bin/pip" install -q "$name" < /dev/null || failed+=("$name")
+    done < "$pending"
+
+    if [ "${#failed[@]}" -eq 0 ]; then
+        rm -f "$pending"
+        return 0
+    fi
+    if ! { printf '%s\n' "${failed[@]}" > "$pending.new" && mv -f "$pending.new" "$pending"; } 2>/dev/null; then
+        bashio::log.warning "Could not update $pending"
+    fi
+    bashio::log.warning "Could not reinstall: ${failed[*]}. The next start tries again, or run: persist-install --python ${failed[*]}"
+}
+
 # Setup tmux configuration and session wrapper
 setup_tmux() {
     local tmux_conf="${HOME}/.tmux.conf"
@@ -1024,6 +1109,7 @@ main() {
     run_health_check
 
     setup_session_picker
+    migrate_python_venv
     setup_persistent_packages
     check_persisted_alpine_release
     detect_app_migration

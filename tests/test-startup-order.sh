@@ -57,6 +57,14 @@ done
 [ "$(line_of check_persisted_alpine_release)" -lt "$(line_of start_web_terminal)" ] || \
     fail "check_persisted_alpine_release must run before start_web_terminal (exec)"
 
+# The venv rebuild needs the network (pip), so the panel comes first; the
+# options' pip packages must land in the rebuilt venv, not the old one.
+[ -n "$(line_of migrate_python_venv)" ] || fail "main() does not call migrate_python_venv"
+[ "$(line_of start_image_service)" -lt "$(line_of migrate_python_venv)" ] || \
+    fail "the image service must start before the venv rebuild"
+[ "$(line_of migrate_python_venv)" -lt "$(line_of setup_persistent_packages)" ] || \
+    fail "the venv must be rebuilt before the options' pip packages are installed"
+
 # grep without -q: an early exit would SIGPIPE sed, and under pipefail a
 # found line would read as "not there".
 if sed -n '/^start_web_terminal() {/,/^}/p' "$run_sh" | grep 'start_image_service' > /dev/null; then

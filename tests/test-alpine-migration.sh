@@ -106,4 +106,104 @@ check_persisted_alpine_release
 [ ! -s "$warnings" ] || fail "an empty package tree must not warn"
 [ "$(cat "$persist/.alpine-release")" = "3.24" ] || fail "a fresh install must record the release"
 
+# --- Python venv after a Python upgrade (3.12 -> 3.14) ------------------------
+
+venv="$tmp_dir/python/venv"
+pending="$tmp_dir/python/.reinstall-pending"
+fake_pip="$tmp_dir/fake-pip"
+fake_python="$tmp_dir/fake-python"
+cat > "$fake_pip" << 'FAKE'
+#!/usr/bin/env bash
+# pip install -q NAME; fails for the names in $PIP_FAIL
+for bad in ${PIP_FAIL:-}; do
+    [ "$3" = "$bad" ] && exit 1
+done
+printf '%s\n' "$3" >> "$PIP_LOG"
+FAKE
+cat > "$fake_python" << 'FAKE'
+#!/usr/bin/env bash
+[ "$1" = "-c" ] && { echo 3.14; exit 0; }
+[ "$1 $2" = "-m venv" ] || exit 1
+[ -z "${VENV_FAIL:-}" ] || exit 1
+mkdir -p "$3/bin"
+printf 'home = /usr/bin\nversion_info = 3.14.10\n' > "$3/pyvenv.cfg"
+cp "$FAKE_PIP" "$3/bin/pip"
+FAKE
+chmod +x "$fake_pip" "$fake_python"
+export FAKE_PIP="$fake_pip" PIP_LOG="$tmp_dir/pip.log" PERSIST_VENV="$venv" PYTHON_BIN="$fake_python"
+export PIP_FAIL='' VENV_FAIL=''
+
+# old_venv NAME:requested ... - a 3.12 venv with these dist-infos
+old_venv() {
+    local spec name
+    rm -rf "$tmp_dir/python" "$PIP_LOG"
+    mkdir -p "$venv/lib/python3.12/site-packages"
+    printf 'home = /usr/bin\nversion = 3.12.16\n' > "$venv/pyvenv.cfg"
+    for spec in "$@"; do
+        name=${spec%%:*}
+        mkdir -p "$venv/lib/python3.12/site-packages/$name-1.0.dist-info"
+        # \r: METADATA written on another system must not leak into the name
+        printf 'Metadata-Version: 2.1\nName: %s\r\nVersion: 1.0\n\nName: not-this\n' "$name" \
+            > "$venv/lib/python3.12/site-packages/$name-1.0.dist-info/METADATA"
+        [ "${spec#*:}" != requested ] || \
+            : > "$venv/lib/python3.12/site-packages/$name-1.0.dist-info/REQUESTED"
+    done
+    : > "$warnings"
+    : > "$errors"
+}
+pip_calls() { sort "$PIP_LOG" 2>/dev/null | tr '\n' ' '; }
+
+# Only what was installed by name (REQUESTED) comes back; pip pulls the
+# dependencies itself. pip/setuptools/wheel come with the new venv.
+old_venv Requests:requested idna:dep pip:requested
+migrate_python_venv
+[ "$(pip_calls)" = "Requests " ] || fail "only REQUESTED packages must be reinstalled, got: $(pip_calls)"
+grep -q 'version_info = 3.14' "$venv/pyvenv.cfg" || fail "the venv must be recreated for the new Python"
+[ ! -e "$venv/lib/python3.12" ] || fail "the old venv must be removed"
+[ ! -e "$pending" ] || fail "the reinstall list must be gone once everything is back"
+grep -q 'Python changed from 3.12 to 3.14' "$warnings" || fail "the rebuild must be logged"
+
+# A venv without any REQUESTED marker (older pip): every package comes back.
+old_venv six:dep idna:dep
+migrate_python_venv
+[ "$(pip_calls)" = "idna six " ] || fail "without REQUESTED markers all packages must come back, got: $(pip_calls)"
+
+# Offline first start: nothing reinstalls, the list survives, startup goes on;
+# the next start with network finishes the job.
+old_venv Requests:requested six:requested
+PIP_FAIL='Requests six' migrate_python_venv
+[ "$(sort "$pending" | tr '\n' ' ')" = "Requests six " ] || \
+    fail "packages that failed to reinstall must stay on the list, got: $(cat "$pending" 2>/dev/null)"
+grep -q 'persist-install --python' "$warnings" || fail "a failed reinstall must name the manual command"
+rm -f "$PIP_LOG"
+migrate_python_venv
+[ "$(pip_calls)" = "Requests six " ] || fail "the next start must retry the list, got: $(pip_calls)"
+[ ! -e "$pending" ] || fail "a finished list must be deleted"
+
+# A venv for the current Python and no list: nothing happens.
+rm -f "$PIP_LOG"
+migrate_python_venv
+[ ! -e "$PIP_LOG" ] || fail "a venv for the current Python must be left alone"
+
+# The venv cannot be recreated: logged, the list stays, startup goes on.
+old_venv Requests:requested
+VENV_FAIL=1 migrate_python_venv
+[ -s "$errors" ] || fail "a failed venv rebuild must be logged as an error"
+grep -qx 'Requests' "$pending" || fail "the list must survive a failed venv rebuild"
+[ ! -e "$PIP_LOG" ] || fail "nothing can be installed without a venv"
+migrate_python_venv
+[ "$(pip_calls)" = "Requests " ] || fail "the next start must rebuild the venv and reinstall, got: $(pip_calls)"
+
+# Blank lines in the list never become an empty pip install.
+rm -rf "$tmp_dir/python" "$PIP_LOG"
+"$fake_python" -m venv "$venv"
+printf '\nsix\n\n' > "$pending"
+migrate_python_venv
+[ "$(pip_calls)" = "six " ] || fail "blank lines in the list must be skipped, got: $(pip_calls)"
+
+# No venv at all (persist-install --python never used): nothing happens.
+rm -rf "$tmp_dir/python" "$PIP_LOG"
+migrate_python_venv
+[ ! -e "$tmp_dir/python" ] || fail "no venv may be created for users who never had one"
+
 echo "Alpine migration suite passed"
