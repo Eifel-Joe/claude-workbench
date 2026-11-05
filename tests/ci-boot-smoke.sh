@@ -102,6 +102,10 @@ log=$(docker logs "$name" 2>&1)
 grep -q 'Something went wrong contacting the API' <<< "$log" || \
     fail "no failed Supervisor API call in the log: the option-read path was not exercised"
 grep -q 'Starting web terminal' <<< "$log" || fail "startup never reached the web terminal"
+# A failed read must come back as the default, not empty (bashio returns empty
+# output with status 0 when read on the left of ||).
+grep -q 'Auto-launch Claude: true' <<< "$log" || \
+    fail "auto_launch_claude did not fall back to its default 'true'"
 in_container 'tmux has-session -t claude' || \
     fail "the tmux session 'claude' is gone (empty launch command?)"
 in_container 'tmux source-file /data/home/.tmux.conf' || \

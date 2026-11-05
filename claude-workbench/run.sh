@@ -56,6 +56,29 @@ run_with_timeout() {
     return "$status"
 }
 
+# Read an app option: the value, or $2 when the read fails or comes back empty.
+# Every option read in this file goes through here, and nothing else calls
+# bashio::config.
+#
+# Root cause: bashio 0.19.0 (Alpine 3.24 base) enables `shopt -s
+# inherit_errexit` (hassio-addons/bashio#192). When the Supervisor API call
+# inside bashio::config fails, a bare `x=$(bashio::config ...)` now fails too:
+# set -e ended startup before the panel, and inside
+# "$(get_claude_launch_command)" it silently emptied the launch command. On the
+# left of || (or in an if) bash ignores errexit, so bashio::config instead
+# returns 0 with EMPTY output (the empty API answer), not its default - that is
+# why `x=$(bashio::config k d) || x=d` is not enough and `${value:-$2}` is
+# needed. Rejected: the `|| x=d` pattern of heytcass 78d7b12f and nsleigh
+# a1f0f2da alone (empty auto_launch_claude opened the session picker instead
+# of Claude). No option has a non-empty default that a user could want to
+# replace with an empty value. tests/test-production-run.sh covers both
+# failure modes.
+read_option() {
+    local value
+    value=$(bashio::config "$1" "$2") || value=''
+    printf '%s\n' "${value:-$2}"
+}
+
 # npm keeps only a download cache. Under HOME=/data/home it landed in
 # /data/home/.npm and so in every backup of the app (115 MB on a real install;
 # heytcass/home-assistant-addons#105). /tmp is emptied on every restart, at
@@ -143,19 +166,9 @@ init_environment() {
     # GitHub CLI persistent configuration
     export GH_CONFIG_DIR="$gh_config_dir"
 
-    # Get dangerously-skip-permissions configuration.
-    #
-    # Every option read in this file is `x=$(bashio::config 'key' 'default') ||
-    # x='default'`. Root cause: bashio 0.19.0 (Alpine 3.24 base) enables
-    # `shopt -s inherit_errexit` (hassio-addons/bashio#192), so bashio::config
-    # now fails when its Supervisor API call fails, where 0.17.5 returned the
-    # default. Under set -e a bare read ended startup here, before the panel;
-    # inside "$(get_claude_launch_command)" it silently emptied the launch
-    # command and the tmux session closed at once. The fallback is the same
-    # default the read already had. tests/test-production-run.sh runs these
-    # functions with a failing bashio::config and rejects any bare read.
+    # Get dangerously-skip-permissions configuration (read_option: see there)
     local dangerously_skip_permissions
-    dangerously_skip_permissions=$(bashio::config 'dangerously_skip_permissions' 'false') || dangerously_skip_permissions='false'
+    dangerously_skip_permissions=$(read_option 'dangerously_skip_permissions' 'false')
     export CLAUDE_DANGEROUS_MODE="$dangerously_skip_permissions"
 
     # This app always runs as root inside an HA supervisor container.
@@ -525,7 +538,7 @@ setup_tmux() {
     local tmux_mouse
     local tmux_wrapper="${TMUX_WRAPPER_PATH:-/usr/local/bin/tmux-claude}"
 
-    tmux_mouse=$(bashio::config 'tmux_mouse' 'false') || tmux_mouse='false'
+    tmux_mouse=$(read_option 'tmux_mouse' 'false')
     case "${tmux_mouse:-false}" in
         true|on|yes|1) tmux_mouse="on" ;;
         *) tmux_mouse="off" ;;
@@ -599,8 +612,8 @@ setup_persistent_claude() {
     local native_bin_link="${CLAUDE_NATIVE_BIN_LINK:-/data/home/.local/bin/claude}"
     local claude_npm_spec="@anthropic-ai/claude-code@latest"
 
-    use_persistent_claude=$(bashio::config 'use_persistent_claude' 'false') || use_persistent_claude='false'
-    auto_update_claude_on_start=$(bashio::config 'auto_update_claude_on_start' 'false') || auto_update_claude_on_start='false'
+    use_persistent_claude=$(read_option 'use_persistent_claude' 'false')
+    auto_update_claude_on_start=$(read_option 'auto_update_claude_on_start' 'false')
 
     # Exported so the session picker knows whether to offer a manual
     # "Update Claude Code" menu option.
@@ -726,9 +739,9 @@ auto_install_packages() {
     local apk_raw pip_raw
 
     # Read into own assignments: as an argument of normalize_config_list a
-    # failed read would vanish without a trace (see init_environment).
-    apk_raw=$(bashio::config 'persistent_apk_packages' '') || apk_raw=''
-    pip_raw=$(bashio::config 'persistent_pip_packages' '') || pip_raw=''
+    # failed read would vanish without a trace (see read_option).
+    apk_raw=$(read_option 'persistent_apk_packages' '')
+    pip_raw=$(read_option 'persistent_pip_packages' '')
     apk_packages=$(normalize_config_list "$apk_raw")
     pip_packages=$(normalize_config_list "$pip_raw")
 
@@ -770,10 +783,10 @@ get_claude_launch_command() {
     local claude_flags=""
 
     # Get configuration values
-    auto_launch_claude=$(bashio::config 'auto_launch_claude' 'true') || auto_launch_claude='true'
-    dangerously_skip_permissions=$(bashio::config 'dangerously_skip_permissions' 'false') || dangerously_skip_permissions='false'
-    remote_control=$(bashio::config 'remote_control' 'false') || remote_control='false'
-    remote_control_session_name=$(bashio::config 'remote_control_session_name' '') || remote_control_session_name=''
+    auto_launch_claude=$(read_option 'auto_launch_claude' 'true')
+    dangerously_skip_permissions=$(read_option 'dangerously_skip_permissions' 'false')
+    remote_control=$(read_option 'remote_control' 'false')
+    remote_control_session_name=$(read_option 'remote_control_session_name' '')
 
     # Claude Code hangs without a word on CPUs without x86-64-v2 (cpu-check.sh);
     # open the session picker instead, which explains it.
@@ -845,7 +858,14 @@ get_claude_launch_command() {
 prune_uploaded_images() {
     local value days removed
 
-    value=$(bashio::config 'image_retention_days' '30') || value='30'
+    # No default here: this option deletes. If the read fails, the schema
+    # default 30 would delete images of a user who set 0 (keep all), so an
+    # unreadable value deletes nothing this time (tests/test-production-run.sh).
+    value=$(read_option 'image_retention_days' '')
+    if [ -z "$value" ]; then
+        bashio::log.warning "image_retention_days could not be read; keeping all uploaded images this time"
+        return 0
+    fi
     case "$value" in
         ''|*[!0-9]*) days=-1 ;;
         *) [ "${#value}" -le 4 ] && days=$((10#$value)) || days=-1 ;;
@@ -875,7 +895,7 @@ prune_uploaded_images() {
 init_auto_continue() {
     local state=off value
 
-    value=$(bashio::config 'auto_continue' 'false') || value='false'
+    value=$(read_option 'auto_continue' 'false')
     [ "$value" = "true" ] && state=on
     if ! { mkdir -p "$AUTO_CONTINUE_DIR" && printf '%s\n' "$state" > "$AUTO_CONTINUE_DIR/auto-continue"; } 2>/dev/null; then
         bashio::log.warning "Could not write the auto-continue switch to ${AUTO_CONTINUE_DIR}; auto-continue stays off"
@@ -1042,7 +1062,7 @@ start_web_terminal() {
 
     # Log the configuration being used
     local auto_launch_claude
-    auto_launch_claude=$(bashio::config 'auto_launch_claude' 'true') || auto_launch_claude='true'
+    auto_launch_claude=$(read_option 'auto_launch_claude' 'true')
     bashio::log.info "Auto-launch Claude: ${auto_launch_claude}"
 
     # Export launch command so the tmux-claude wrapper and session can access it

@@ -173,46 +173,83 @@ printf '%s\n' 'info|App migration: nothing to offer (state)' \
 cmp -s "$tmp_dir/migration.expected" "$tmp_dir/migration.log" || \
     fail "detect_app_migration must log WARNING: lines as warnings"
 
-# bashio 0.19.0 (Alpine 3.24 base) runs run.sh with inherit_errexit, so a
-# bashio::config whose Supervisor API call fails now fails itself. Under set -e
-# an unguarded `x=$(bashio::config ...)` ends startup, and inside
-# `"$(get_claude_launch_command)"` it silently empties the launch command. Every
-# read must fall back to its default. The subshell runs in the background
-# because bash ignores set -e in a subshell tested with || or if (technique from
-# nsleigh, ESJavadex/claude-code-ha@a1f0f2da).
-uploads="$tmp_dir/uploads"
-mkdir -p "$uploads"
-touch -d '40 days ago' "$uploads/pasted-old.png"
-touch "$uploads/pasted-new.png"
+# bashio 0.19.0 (Alpine 3.24 base) runs run.sh with inherit_errexit. When the
+# Supervisor API call inside bashio::config fails, the read either aborts (a
+# bare `x=$(bashio::config ...)`: set -e ends startup) or, on the left of || or
+# inside if, returns 0 with EMPTY output, since bash ignores errexit there and
+# bashio then prints the empty API answer. Either way the default is lost, and
+# inside "$(get_claude_launch_command)" an abort silently emptied the launch
+# command. Every read goes through read_option, which falls back to the
+# default in both cases. Both stub variants model the real bashio: "abort" is
+# the bare-read behaviour, "empty" the || behaviour (o=$(false) fails the stub
+# only where errexit is active, exactly like bashio's options=$(...)). The
+# subshell runs in the background because bash ignores set -e in a subshell
+# tested with || or if (technique from nsleigh, ESJavadex/claude-code-ha@a1f0f2da).
+for variant in abort empty; do
+    uploads="$tmp_dir/uploads-$variant"
+    reads_log="$tmp_dir/option-reads-$variant.warnings"
+    mkdir -p "$uploads"
+    touch -d '40 days ago' "$uploads/pasted-old.png"
+    touch "$uploads/pasted-new.png"
+    rm -f "$tmp_dir/option-reads"
+    (
+        set -euo pipefail
+        shopt -s inherit_errexit
+        if [ "$variant" = abort ]; then
+            bashio::config() { return 1; }
+        else
+            bashio::config() { local options; options=$(false); printf '%s' "$options"; }
+        fi
+        bashio::log.warning() { printf '%s\n' "$*" >> "$reads_log"; }
+        [ "$(read_option 'auto_launch_claude' 'true')" = true ]
+        [ "$(read_option 'image_retention_days' '30')" = 30 ]
+        setup_tmux
+        grep -qx 'set -g mouse off' "$HOME/.tmux.conf"
+        launch=$(get_claude_launch_command)
+        [[ "$launch" == *"Starting Claude"* ]]
+        setup_persistent_claude
+        [ "$USE_PERSISTENT_CLAUDE" = false ]
+        PERSIST_INSTALL_LOG="$tmp_dir/option-reads-install.log"
+        auto_install_packages
+        [ ! -e "$PERSIST_INSTALL_LOG" ]
+        # A deletion must not run on a guessed value: a user who set 0 (keep
+        # all) would lose images to the default 30 whenever the read fails.
+        IMAGE_UPLOAD_DIR="$uploads" prune_uploaded_images
+        [ -e "$uploads/pasted-old.png" ]
+        grep -q 'image_retention_days could not be read' "$reads_log"
+        AUTO_CONTINUE_DIR="$tmp_dir/auto-continue" init_auto_continue
+        [ "$(cat "$tmp_dir/auto-continue/auto-continue")" = off ]
+        echo survived > "$tmp_dir/option-reads"
+    ) &
+    wait $! || true
+    [ "$(cat "$tmp_dir/option-reads" 2>/dev/null)" = "survived" ] || \
+        fail "a failed option read ($variant) must fall back to its default, not end startup or come back empty"
+    # An empty auto_launch_claude would open the session picker (or this
+    # warning without one) instead of Claude.
+    ! grep -q 'falling back to auto-launch' "$reads_log" 2>/dev/null || \
+        fail "a failed read ($variant) left auto_launch_claude empty"
+done
+
+# A set value wins over the default; only a failed or empty read falls back.
 (
     set -euo pipefail
     shopt -s inherit_errexit
-    bashio::config() { return 1; }
-    setup_tmux
-    grep -qx 'set -g mouse off' "$HOME/.tmux.conf"
-    launch=$(get_claude_launch_command)
-    [[ "$launch" == *"/usr/local/bin/claude"* ]]
-    setup_persistent_claude
-    [ "$USE_PERSISTENT_CLAUDE" = false ]
-    PERSIST_INSTALL_LOG="$tmp_dir/option-reads-install.log"
-    auto_install_packages
-    [ ! -e "$PERSIST_INSTALL_LOG" ]
-    IMAGE_UPLOAD_DIR="$uploads" prune_uploaded_images
-    # Separate lines: set -e ignores a failure on the left of &&.
-    [ ! -e "$uploads/pasted-old.png" ]
-    [ -e "$uploads/pasted-new.png" ]
-    AUTO_CONTINUE_DIR="$tmp_dir/auto-continue" init_auto_continue
-    [ "$(cat "$tmp_dir/auto-continue/auto-continue")" = off ]
-    echo survived > "$tmp_dir/option-reads"
+    bashio::config() { printf '%s' false; }
+    [ "$(read_option 'auto_launch_claude' 'true')" = false ]
+    bashio::config() { printf '%s' 0; }
+    [ "$(read_option 'image_retention_days' '30')" = 0 ]
+    echo survived > "$tmp_dir/option-values"
 ) &
 wait $! || true
-[ "$(cat "$tmp_dir/option-reads" 2>/dev/null)" = "survived" ] || \
-    fail "a failed option read must fall back to its default, not end startup"
+[ "$(cat "$tmp_dir/option-values" 2>/dev/null)" = "survived" ] || \
+    fail "read_option must return a value that was read"
 
-# Every option read is an assignment with its own default as the fallback.
-while IFS= read -r line; do
-    printf '%s\n' "$line" | grep -qE "^[[:space:]]*([a-z_]+)=\\\$\(bashio::config '[a-z_]+' '([^']*)'\) \|\| \1='\2'$" || \
-        fail "option read without its default as fallback: $line"
-done < <(grep -E 'bashio::config ' "$repo_root/claude-workbench/run.sh" | grep -vE '^[[:space:]]*#')
+# bashio::config is called in exactly one place, read_option; every option
+# read goes through it.
+config_calls=$(grep -E 'bashio::config ' "$repo_root/claude-workbench/run.sh" | grep -vcE '^[[:space:]]*#')
+[ "$config_calls" -eq 1 ] || fail "bashio::config must only be called inside read_option ($config_calls calls)"
+# grep without -q: an early exit would SIGPIPE sed under pipefail.
+sed -n '/^read_option() {/,/^}/p' "$repo_root/claude-workbench/run.sh" | grep 'bashio::config ' > /dev/null || \
+    fail "read_option must be the one place that calls bashio::config"
 
 echo "Production run.sh regression suite passed"
