@@ -142,6 +142,7 @@ program in the terminal cannot exfiltrate your clipboard.
 ### Persistent Packages
 - Configure APK and pip packages to auto-install on startup
 - Packages are stored in `/data/packages` and survive restarts
+- When an update moves the app to a new Alpine release (3.6.0: Alpine 3.24, Python 3.14), the first start rebuilds the Python environment and reinstalls your Python packages (this needs the network; anything that fails is retried on the next start). Old copies of system libraries are moved to `/data/packages/stale-alpine-<old release>`, and the log names system packages to reinstall with `persist-install`. Details: `PERSISTENT_PACKAGES.md`, "After an update to a new Alpine release"
 - The app's own Claude Code commands (`/install`, `/install-python`, `/list-packages`) and its persistent-package skill are refreshed in `~/.claude` on every start; save your own variants under a different name
 
 ### Optional Persistent Claude Code

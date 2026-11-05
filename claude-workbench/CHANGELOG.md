@@ -1,5 +1,62 @@
 # Changelog
 
+## 3.6.0
+
+### 🔧 Technical - Alpine 3.24 base image
+- **The app now runs on Alpine 3.24.** Alpine 3.21 has been out of security
+  support since 1 November 2026. The new base brings Python 3.14 (was 3.12),
+  Node.js 24 (was 22), tmux 3.7c (was 3.5a), musl 1.2.6 and bashio 0.19.0;
+  ttyd stays at 1.7.7. Every package the app installs exists under the same
+  name.
+- **Security fixes between base image releases:** the image runs
+  `apk upgrade` before installing its packages.
+
+### 🐛 Bug Fix - Startup survives a failed option read
+- **No more startup abort when the Supervisor API is briefly unreachable.**
+  bashio 0.19.0 enables `inherit_errexit`, so reading an app option now fails
+  instead of returning its default when the Supervisor API can't be reached.
+  `run.sh` runs under `set -e`: the first option read would have ended
+  startup before the panel. Worse, a failed read inside the Claude launch
+  command left it empty, and the terminal session closed at once without a
+  word. Every option read now falls back to its default.
+
+### 🛠️ Improvement - Your packages after the move
+- **Python packages installed with `persist-install` come back.** Their venv
+  belongs to the Python that created it; under 3.14 they no longer imported
+  and the venv's `pip` broke. The first start notices the version change,
+  rebuilds the venv and reinstalls the packages you installed by name (this
+  needs the network). Whatever fails stays on a list and is tried again on the
+  next start; the log names the command to do it by hand.
+- **Old library copies can't break the panel.** `/data/packages/lib` comes
+  first on `LD_LIBRARY_PATH`, so a 3.21 copy of a library the system also has
+  (libstdc++, for example) would have been loaded by the app's own Node.js
+  service too. Such copies are moved to `/data/packages/stale-alpine-3.21`
+  before the panel starts; nothing is deleted.
+- **The log names what to reinstall:** files installed with `persist-install`
+  on 3.21 that have no identical system copy, so you can run
+  `persist-install` for them again. See "After an update to a new Alpine
+  release" in `PERSISTENT_PACKAGES.md`.
+
+### 🔧 Technical - CI boots the real image
+- The CI used to only build the images. It now boots the amd64 image without a
+  Supervisor (every option read fails) and with `/data` as Alpine 3.21 left
+  it, and checks the panel, ttyd, the tmux session and config, the rebuilt
+  venv, the moved library copy and the image contents (Python, Node, tmux,
+  musl, `claude --version`). The regression suites run on Node 24, like the
+  image.
+
+### 📚 Credits
+- The move to Alpine 3.24 follows Neil Sleightholm (nsleigh,
+  ESJavadex/claude-code-ha#56, `a1f0f2da`) and heytcass (`2ec549c0`,
+  `78d7b12f`, `6641bfe0`, heytcass/home-assistant-addons#154), who took the
+  base image move and `apk upgrade` from owine's fork. The option-read
+  fallbacks and the venv rebuild are adapted from both. The CI boot test
+  builds on heytcass (`d50e6c0d`, #139) and unsnow-iac (`4eaad373`).
+- Our own additions: the root cause in bashio 0.19.0's `inherit_errexit`,
+  which also silently emptied the Claude launch command; the reinstall list
+  that survives an offline start; and moving stale library copies aside
+  before the panel starts.
+
 ## 3.5.1
 
 ### 🐛 Bug Fix - Key bar did nothing on iPhone
