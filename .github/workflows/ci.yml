@@ -130,12 +130,21 @@ jobs:
 
       # Builds only, never pushes. This is the check that was missing when the
       # ARMv7 architecture detection silently broke every 32-bit build.
+      # amd64 is loaded into the runner's Docker to be booted below; booting
+      # aarch64 under QEMU would take too long.
       - name: Build add-on image
         uses: docker/build-push-action@v7
         with:
           context: claude-workbench
           platforms: ${{ matrix.platform }}
           push: false
-          load: false
+          load: ${{ matrix.arch == 'amd64' }}
+          tags: local/claude-workbench:ci
           build-args: |
             BUILD_ARCH=${{ matrix.arch }}
+
+      # Boots the real image without a Supervisor (every option read fails)
+      # and with /data as Alpine 3.21 left it; see the script's header.
+      - name: Boot the image without a Supervisor
+        if: matrix.arch == 'amd64'
+        run: tests/ci-boot-smoke.sh local/claude-workbench:ci
