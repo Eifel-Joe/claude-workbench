@@ -166,6 +166,10 @@ function fakeBar(keys) {
             dataset: { key: k },
             parentNode: bar,
             textContent: k === 'ctrl-c' ? '^C' : k,
+            attrs: { 'aria-label': k === 'ctrl-c' ? 'Ctrl+C' : k },
+            getAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n] : null; },
+            setAttribute(n, v) { this.attrs[n] = String(v); },
+            removeAttribute(n) { delete this.attrs[n]; },
             classList: {
                 add: (c) => classes.add(c),
                 remove: (c) => classes.delete(c),
@@ -193,13 +197,14 @@ test('installKeyBar sends the tapped key as typed input', () => {
     assert.deepEqual(term.sent, [['\x1b[B', true], ['\r', true], ['\x1b[Z', true]]);
 });
 
-test('installKeyBar keeps the focus in the terminal', () => {
+test('installKeyBar keeps the focus in the terminal without cancelling pointerdown', () => {
     const bar = fakeBar(ALL_KEYS);
     ui.installKeyBar(bar, () => fakeTerm());
-    assert.equal(bar.fire('pointerdown', bar.buttons.esc).prevented, true);
+    // WebKit drops the tap's click after a cancelled pointerdown: no key is sent.
+    assert.equal(bar.fire('pointerdown', bar.buttons.esc).prevented, false);
     assert.equal(bar.fire('mousedown', bar.buttons.esc).prevented, true);
     // A tap on the bar's gap is not a key: leave it alone.
-    assert.equal(bar.fire('pointerdown', bar).prevented, false);
+    assert.equal(bar.fire('mousedown', bar).prevented, false);
 });
 
 // iOS Safari only applies :active to an element under a touch listener;
@@ -274,6 +279,74 @@ test('installKeyBar guards Ctrl+C and shows wait until it is free again', () => 
     assert.equal(term.sent.length, 2);
 });
 
+test('installKeyBar announces the locked Ctrl+C as locked, then restores it', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const term = fakeTerm();
+    const clock = { t: 0 };
+    const timers = [];
+    ui.installKeyBar(bar, () => term, {
+        now: () => clock.t,
+        setTimeout: (fn, ms) => timers.push([fn, ms]),
+    });
+    const ctrlC = bar.buttons['ctrl-c'];
+    bar.fire('click', ctrlC);
+    assert.equal(ctrlC.getAttribute('aria-disabled'), 'true');
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C, locked, wait a moment');
+    // A refused second tap changes nothing and starts no second timer.
+    clock.t = 500;
+    bar.fire('click', ctrlC);
+    assert.equal(timers.length, 1);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C, locked, wait a moment');
+    timers[0][0]();
+    assert.equal(ctrlC.getAttribute('aria-disabled'), null);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C');
+});
+
+test('installKeyBar restores the original label, not a hard-coded one', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const ctrlC = bar.buttons['ctrl-c'];
+    ctrlC.attrs['aria-label'] = 'Strg+C';
+    const timers = [];
+    ui.installKeyBar(bar, () => fakeTerm(), { now: () => 0, setTimeout: (fn) => timers.push(fn) });
+    bar.fire('click', ctrlC);
+    timers[0]();
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Strg+C');
+});
+
+// A late timer (iOS throttles pages) must not leave the key announced as locked
+// when the guard's clock already allowed the next tap.
+test('installKeyBar keeps the original label when a late timer overlaps the next lock', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const clock = { t: 0 };
+    const timers = [];
+    ui.installKeyBar(bar, () => fakeTerm(), {
+        now: () => clock.t,
+        setTimeout: (fn) => timers.push(fn),
+    });
+    const ctrlC = bar.buttons['ctrl-c'];
+    bar.fire('click', ctrlC);
+    clock.t = 2000;                       // guard is free, first timer has not fired
+    bar.fire('click', ctrlC);
+    assert.equal(timers.length, 2);
+    timers[0]();                          // late first timer: second lock still running
+    assert.equal(ctrlC.getAttribute('aria-disabled'), 'true');
+    timers[1]();
+    assert.equal(ctrlC.getAttribute('aria-disabled'), null);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C');
+});
+
+test('installKeyBar gives a Ctrl+C button without a label none back', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const ctrlC = bar.buttons['ctrl-c'];
+    delete ctrlC.attrs['aria-label'];
+    const timers = [];
+    ui.installKeyBar(bar, () => fakeTerm(), { now: () => 0, setTimeout: (fn) => timers.push(fn) });
+    bar.fire('click', ctrlC);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C, locked, wait a moment');
+    timers[0]();
+    assert.equal(ctrlC.getAttribute('aria-label'), null);
+});
+
 test('installKeyBar installs once per bar', () => {
     const bar = fakeBar(ALL_KEYS);
     const term = fakeTerm();
@@ -282,4 +355,25 @@ test('installKeyBar installs once per bar', () => {
     bar.fire('click', bar.buttons.esc);
     assert.deepEqual(term.sent, [['\x1b', true]]);
     assert.equal(ui.installKeyBar(null, () => term), false);
+});
+
+// The look of the bar cannot run in node, so the rules are checked as text. The
+// effect on a real iPhone (no menu, clear of the home bar) is checked by hand.
+function cssBlock(selector) {
+    const html = require('node:fs').readFileSync(
+        path.join(__dirname, '..', 'claude-workbench', 'image-service', 'public', 'index.html'), 'utf8');
+    const start = html.indexOf('\n        ' + selector + ' {');
+    assert.notEqual(start, -1, 'rule not found: ' + selector);
+    return html.slice(start, html.indexOf('}', start));
+}
+
+test('key bar buttons show no iOS callout menu on a long press', () => {
+    const rule = cssBlock('#key-bar button');
+    assert.match(rule, /-webkit-touch-callout:\s*none;/);
+    assert.match(rule, /user-select:\s*none;/);
+});
+
+test('key bar keeps clear of the iPhone home bar', () => {
+    assert.match(cssBlock('#key-bar'),
+        /padding-bottom:\s*max\(4px,\s*env\(safe-area-inset-bottom\)\);/);
 });

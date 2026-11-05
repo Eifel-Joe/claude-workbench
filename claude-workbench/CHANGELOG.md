@@ -1,5 +1,36 @@
 # Changelog
 
+## 3.5.1
+
+### 🐛 Bug Fix - Key bar did nothing on iPhone
+- **Taps now reach the terminal on iPhone** (Safari and the Home Assistant
+  app): the bar cancelled `pointerdown` to keep the keyboard open, and WebKit
+  then drops the tap's click, so no key was ever sent. Only `mousedown` is
+  cancelled now; the keyboard still stays open (ESJavadex,
+  ESJavadex/claude-code-ha@ab961533).
+- **No callout menu** when you long-press a key.
+- **The bar keeps clear of the home bar** on iPhones that report one.
+- **Screen readers hear the locked ^C key as locked** during its two-second
+  wait, and the original label comes back afterwards.
+
+### 📚 Credits
+- The key bar itself comes from mattbsea (mattbsea's heytcass fork, commit
+  `ed215953`), weiting-tw (`fe0a4ec9`) and marcjay (`f6674b77`), see 3.5.0.
+  The iPhone tap fix and the real-browser test are ESJavadex's. The callout,
+  home-bar and screen-reader changes are our own; no upstream or fork has
+  them.
+
+### 🔧 Technical - Dependency security updates
+- **Image service libraries updated** to clear two new high-severity advisories
+  (body-parser 1.20.9 for GHSA-27r3-jxmh-p828, multer 2.5.0 for
+  GHSA-q7qp-rjg7-q26m; also express 4.22.3 and qs 6.17.1). Lockfile only.
+
+### 🔧 Technical - Real-browser test
+- CI now taps the key bar with real touch input in Chromium and WebKit (new
+  job `browser`, Playwright 1.64.1). The unit tests only simulate the
+  browser and had missed the iPhone bug (ESJavadex,
+  ESJavadex/claude-code-ha@ab961533).
+
 ## 3.5.0
 
 ### ✨ New Feature - Key bar for phones

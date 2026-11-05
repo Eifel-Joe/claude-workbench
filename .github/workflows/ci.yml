@@ -81,6 +81,33 @@ jobs:
       - name: Run all suites
         run: ./tests/run-tests.sh
 
+  # Real touch taps in real engines. The unit tests call listeners directly
+  # and missed WebKit dropping the click after a cancelled pointerdown (the
+  # key bar did nothing on iPhone). Approach: ESJavadex,
+  # ESJavadex/claude-code-ha@ab961533.
+  browser:
+    name: Key bar in real browsers (Chromium, WebKit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/browser/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: tests/browser
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium webkit
+
+      - name: Real touch taps send keys and keep the terminal focus
+        working-directory: tests/browser
+        run: npm test
+
   build:
     name: Build image (${{ matrix.arch }})
     runs-on: ubuntu-24.04
