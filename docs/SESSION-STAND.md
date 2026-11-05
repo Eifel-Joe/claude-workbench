@@ -1,5 +1,37 @@
 # Sitzungsstand
 
+## 2026-11-05 (18) — 3.5.1 Tastenleiste: iPhone-Fix und Browser-Test
+
+### Stand
+- Spec `docs/specs/2026-11-05-key-bar-fixes-3.5.1-design.md`, Plan
+  `docs/plans/2026-11-05-key-bar-fixes-3.5.1.md`, Branch `fix/key-bar-3.5.1`.
+- Verifiziert lokal: `node --test tests/test-workbench-ui.js` 24/24, `tests/test-release-metadata.sh`,
+  `tests/browser` (`npm test`) in Chromium und WebKit grün; gegen das Skript aus 3.5.0 scheitert
+  WebKit (Tipp kommt nie an), ohne `mousedown`-Abbruch scheitert die Fokusprüfung.
+- Umgesetzt: kein `pointerdown`-Abbruch mehr (ESJavadex/claude-code-ha@ab961533), CI-Job `browser`
+  (Playwright 1.64.1, `ubuntu-24.04`), `-webkit-touch-callout: none`, Abstand zur Home-Leiste,
+  ^C-Sperre per `aria-disabled`/`aria-label` mit Original-Wiederherstellung.
+- Opus-Review: zwei Funde (Label-Rennen bei verspätetem Timer, nicht scheiterbare Fokusprüfung)
+  behoben. CI-Ergebnis und PR: unbestätigt bis zum Lauf.
+- unbestätigt: Callout-Verhalten und Home-Leisten-Abstand am echten iPhone (Handy-Test p04).
+
+### Verworfen
+- Auf `touchstart`/`pointerup` selbst senden statt auf `click` (größerer Eingriff, Doppelsenden).
+
+### Fallen
+- Playwright behandelt `aria-disabled` als „nicht aktiv“: der Zweit-Tap auf die gesperrte ^C-Taste
+  braucht `tap({ force: true })`.
+- Lokal Browser nur mit `PLAYWRIGHT_BROWSERS_PATH` und `npm_config_cache` unter `.tmp/` (nie C:).
+- `browser` ist kein Pflicht-Check, solange er nicht in den Branch-Schutzregeln eingetragen ist.
+- `env(safe-area-inset-bottom)` ist 0, wo iOS keinen Abstand meldet (kein `viewport-fit=cover`).
+
+### Nächste Schritte
+- Handy-Test auf Prod (p04), Tastenleiste hinter der iOS-Tastatur (p02).
+- Check „Key bar in real browsers (Chromium, WebKit)“ in den Branch-Schutzregeln ergänzen.
+
+### Empfohlene Skills
+- `task-loop`, `pr-workflow`.
+
 ## 2026-10-12 (17) — 3.5.0 Tastenleiste für das Handy (erster PR-Weg)
 
 ### Stand
