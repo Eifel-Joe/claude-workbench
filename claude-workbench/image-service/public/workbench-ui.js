@@ -116,10 +116,13 @@
 
     /**
      * Wire the phone key bar. getTerm is asked on every tap: the ttyd frame
-     * reloads on reconnect and then has a new term. pointerdown and mousedown
-     * are cancelled so the tap does not move the focus out of the terminal -
-     * that would close the on-screen keyboard (and a tap with the keyboard
-     * closed must not open it).
+     * reloads on reconnect and then has a new term. mousedown is cancelled so
+     * the tap does not move the focus out of the terminal - that would close
+     * the on-screen keyboard (and a tap with the keyboard closed must not open
+     * it). pointerdown is left alone on purpose: cancelling it makes WebKit
+     * (every iPhone browser) drop the click the tap would produce, so no key
+     * arrives. Found and proven in a real browser by ESJavadex,
+     * ESJavadex/claude-code-ha@ab961533; tests/browser covers it.
      */
     function installKeyBar(bar, getTerm, options) {
         if (!bar || bar[KEYBAR_FLAG]) return false;
@@ -139,7 +142,6 @@
         function keepFocus(e) {
             if (keyButton(e.target)) e.preventDefault();
         }
-        bar.addEventListener('pointerdown', keepFocus);
         bar.addEventListener('mousedown', keepFocus);
         // iOS Safari applies :active only under a touch listener; without the
         // pressed look people tap twice, and ↑ / ↵ are not guarded. Passive and

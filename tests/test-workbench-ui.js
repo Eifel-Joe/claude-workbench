@@ -193,13 +193,14 @@ test('installKeyBar sends the tapped key as typed input', () => {
     assert.deepEqual(term.sent, [['\x1b[B', true], ['\r', true], ['\x1b[Z', true]]);
 });
 
-test('installKeyBar keeps the focus in the terminal', () => {
+test('installKeyBar keeps the focus in the terminal without cancelling pointerdown', () => {
     const bar = fakeBar(ALL_KEYS);
     ui.installKeyBar(bar, () => fakeTerm());
-    assert.equal(bar.fire('pointerdown', bar.buttons.esc).prevented, true);
+    // WebKit drops the tap's click after a cancelled pointerdown: no key is sent.
+    assert.equal(bar.fire('pointerdown', bar.buttons.esc).prevented, false);
     assert.equal(bar.fire('mousedown', bar.buttons.esc).prevented, true);
     // A tap on the bar's gap is not a key: leave it alone.
-    assert.equal(bar.fire('pointerdown', bar).prevented, false);
+    assert.equal(bar.fire('mousedown', bar).prevented, false);
 });
 
 // iOS Safari only applies :active to an element under a touch listener;
