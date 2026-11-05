@@ -63,7 +63,7 @@ real image builds for amd64 and aarch64.
 
 ### Add-on Structure (claude-workbench/)
 - **config.yaml** - Home Assistant add-on configuration (version, arch list, ingress, options)
-- **Dockerfile** - Alpine-based container with Node.js and Claude Code CLI; pins the base image (`FROM ghcr.io/home-assistant/base:3.21`) and the image labels. There is no build.yaml (deprecated by the Supervisor).
+- **Dockerfile** - Alpine-based container with Node.js and Claude Code CLI; pins the base image (`FROM ghcr.io/home-assistant/base:3.24`) and the image labels. There is no build.yaml (deprecated by the Supervisor).
 - **run.sh** - Main startup script with credential management and ttyd terminal
 - **scripts/** - Modular credential management scripts
 
@@ -152,6 +152,7 @@ podman exec test-claude-dev chmod +x /opt/scripts/claude-session-picker.sh
 - **Indentation**: 2 spaces for YAML, 4 spaces for shell scripts
 - **Error Handling**: Use `bashio::log.error` for error reporting
 - **Permissions**: Credential files must have 600 permissions
+- **Option reads**: read app options only through `read_option 'key' 'default'` in `run.sh`, as its own assignment: `x=$(read_option 'tmux_mouse' 'false')`. bashio 0.19.0 (Alpine 3.24 base) adds `inherit_errexit`: when the Supervisor API can't be reached, a bare `bashio::config` read ends startup under `set -e`, and on the left of `||` it returns an EMPTY value instead of its default. `read_option` turns both into the default. An option that deletes something (`image_retention_days`) gets no default and does nothing when unreadable. `tests/test-production-run.sh` fails if anything but `read_option` calls `bashio::config`.
 
 ### Key Environment Variables
 - `HOME=/data/home`

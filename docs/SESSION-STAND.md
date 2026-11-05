@@ -1,5 +1,54 @@
 # Sitzungsstand
 
+## 2026-11-05 (19) — 3.6.0 Basis-Image Alpine 3.24 (p08)
+
+### Stand
+- Spec `docs/specs/2026-11-05-alpine-3.24-design.md`, Plan `docs/plans/2026-11-05-alpine-3.24.md`,
+  Branch `chore/alpine-3.24`. Freigabe des Users mit 3.6.0 („Ja, mit 3.6.0“, über die Hauptsitzung).
+- Wurzel der Startfalle belegt: bashio 0.19.0 im 3.24-Base setzt `shopt -s inherit_errexit`
+  (hassio-addons/bashio#192); `bashio::config` scheitert dann bei unerreichbarer Supervisor-API.
+  Zusätzlich gefunden: im Argument `"$(get_claude_launch_command)"` entstand still ein leerer
+  Startbefehl.
+- Umgesetzt: abgesicherte Option-Abfragen, `move_stale_persisted_libs`,
+  `check_persisted_alpine_release`, `migrate_python_venv` mit `.reinstall-pending`,
+  `FROM …/base:3.24` + `apk upgrade`, CI-Boot-Test `tests/ci-boot-smoke.sh` (amd64), CI auf Node 24.
+- Lokal grün (Windows/Git Bash): `test-alpine-migration.sh`, `test-startup-order.sh`,
+  `test-release-metadata.sh`, `test-startup-timeouts.sh`, `test-image-retention.sh`,
+  `test-claude-assets.sh`, `test-npm-cache.sh`, `test-tmux-config.sh`, `test-auto-continue-cmd.sh`,
+  der neue Option-Block aus `test-production-run.sh` isoliert; shellcheck wie CI.
+- Opus-Review: Fund 1 (wichtig) bestätigt und behoben. Mit `x=$(bashio::config k d) || x=d` liefert
+  bashio 0.19.0 eine **leere** Ausgabe mit Status 0, weil links von `||` errexit nicht greift. Neu ist
+  deshalb `read_option` mit `${value:-default}`. `image_retention_days` löscht bei unlesbarem Wert
+  nichts. Ebenfalls behoben: Pakete mit `direct_url.json`, Abbruch nach drei Starts, atomare Liste,
+  Quarantäne ohne Überschreiben, Doku „falls vorhanden“ (persist-install kopiert praktisch nichts).
+- unbestätigt bis CI: Boot-Test, Image-Builds amd64/aarch64, hadolint mit `apk upgrade`,
+  `test-image-service.js` unter Node 24 (lokal alle 20 Tests grün, aber die Datei scheitert an einem
+  `ECONNRESET` nach Testende im WebSocket-Test; vermutlich Windows, in der CI prüfen).
+
+### Verworfen
+- Nur warnen bei alten Bibliothekskopien (nsleighs Stand): eine Kopie vor node bricht das Panel,
+  bevor jemand das Log liest.
+- `bashio_self` (Umbenennung `bashio::addon.*`): wir rufen keine `addon.*`-Funktion auf.
+
+### Fallen
+- Drei Suiten laufen unter Windows schon auf `main` nicht: `test-production-run.sh` (Symlinks, keine
+  Rechte), `test-startup-hardening.sh` (`apk`), `test-persist-install.sh`. Nur in der CI prüfbar;
+  den neuen Block von `test-production-run.sh` isoliert in `.tmp/` laufen lassen.
+- `PATH="/c/WINDOWS/system32:$PATH"` nur für Node-Tests: sonst greifen Windows-`find` und
+  `timeout` in den Bash-Suiten.
+- `set -e` ignoriert ein Scheitern links von `&&`: Prüfungen in Tests auf eigene Zeilen.
+- Neue Test-Skripte im Index als ausführbar markieren (`git update-index --chmod=+x`),
+  `run-tests.sh` ruft sie direkt auf.
+
+### Nächste Schritte
+- Opus-Review, PR-Text freigeben, PR, CI grün; danach übernimmt die Hauptsitzung Merge, Release
+  und HA-Updates. Prod-Testplan: Spec, Abschnitt „Ende-zu-Ende-Kriterium“.
+- Punkteliste: n10 (Bibliotheksordner vor den App-Diensten), n11 (Zeitlimit für die
+  Options-Abfrage) unter „Neu aufgetaucht“.
+
+### Empfohlene Skills
+- `task-loop`, `release-weg`, `superpowers:systematic-debugging` bei rotem Boot-Test.
+
 ## 2026-11-05 (18) — 3.5.1 Tastenleiste: iPhone-Fix und Browser-Test
 
 ### Stand

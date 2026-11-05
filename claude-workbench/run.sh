@@ -56,6 +56,29 @@ run_with_timeout() {
     return "$status"
 }
 
+# Read an app option: the value, or $2 when the read fails or comes back empty.
+# Every option read in this file goes through here, and nothing else calls
+# bashio::config.
+#
+# Root cause: bashio 0.19.0 (Alpine 3.24 base) enables `shopt -s
+# inherit_errexit` (hassio-addons/bashio#192). When the Supervisor API call
+# inside bashio::config fails, a bare `x=$(bashio::config ...)` now fails too:
+# set -e ended startup before the panel, and inside
+# "$(get_claude_launch_command)" it silently emptied the launch command. On the
+# left of || (or in an if) bash ignores errexit, so bashio::config instead
+# returns 0 with EMPTY output (the empty API answer), not its default - that is
+# why `x=$(bashio::config k d) || x=d` is not enough and `${value:-$2}` is
+# needed. Rejected: the `|| x=d` pattern of heytcass 78d7b12f and nsleigh
+# a1f0f2da alone (empty auto_launch_claude opened the session picker instead
+# of Claude). No option has a non-empty default that a user could want to
+# replace with an empty value. tests/test-production-run.sh covers both
+# failure modes.
+read_option() {
+    local value
+    value=$(bashio::config "$1" "$2") || value=''
+    printf '%s\n' "${value:-$2}"
+}
+
 # npm keeps only a download cache. Under HOME=/data/home it landed in
 # /data/home/.npm and so in every backup of the app (115 MB on a real install;
 # heytcass/home-assistant-addons#105). /tmp is emptied on every restart, at
@@ -143,9 +166,9 @@ init_environment() {
     # GitHub CLI persistent configuration
     export GH_CONFIG_DIR="$gh_config_dir"
 
-    # Get dangerously-skip-permissions configuration
+    # Get dangerously-skip-permissions configuration (read_option: see there)
     local dangerously_skip_permissions
-    dangerously_skip_permissions=$(bashio::config 'dangerously_skip_permissions' 'false')
+    dangerously_skip_permissions=$(read_option 'dangerously_skip_permissions' 'false')
     export CLAUDE_DANGEROUS_MODE="$dangerously_skip_permissions"
 
     # This app always runs as root inside an HA supervisor container.
@@ -320,13 +343,240 @@ install_tools() {
     bashio::log.info "Tools installed successfully"
 }
 
+# The Alpine release of the base image (X.Y) and the one /data/packages was
+# last checked against. Without a marker it is 3.21: every release before 3.6.0
+# was built on it. Sets ALPINE_RELEASE_CURRENT (empty when unreadable) and
+# ALPINE_RELEASE_PREVIOUS. PERSIST_ROOT, SYSTEM_ROOT and ALPINE_RELEASE_FILE
+# are overridable for tests only (tests/test-alpine-migration.sh).
+persisted_alpine_releases() {
+    local root="${PERSIST_ROOT:-/data/packages}"
+    ALPINE_RELEASE_CURRENT=$(cut -d. -f1,2 "${ALPINE_RELEASE_FILE:-/etc/alpine-release}" 2>/dev/null) || \
+        ALPINE_RELEASE_CURRENT=''
+    ALPINE_RELEASE_PREVIOUS=$(cat "$root/.alpine-release" 2>/dev/null) || ALPINE_RELEASE_PREVIOUS=''
+    [ -n "$ALPINE_RELEASE_PREVIOUS" ] || ALPINE_RELEASE_PREVIOUS='3.21'
+}
+
+# persist-install copies a package's shared libraries into /data/packages/lib,
+# which init_environment puts FIRST on LD_LIBRARY_PATH, for node (the image
+# service, the panel's entry point) as well. After the base image moves to a new
+# Alpine release, an old copy of a library the system also has (libstdc++,
+# sqlite-libs ...) would be loaded instead of the system's own: node can fail to
+# start, the panel stays blank and set -e ends startup. So, once per release
+# change and before the image service starts, move every copy whose name the
+# system also has, with different content, to stale-alpine-<old>/lib. Nothing is
+# deleted. Copies without a system counterpart stay; check_persisted_alpine_release
+# names them later. Rejected: only warning (nsleigh's version) - the panel breaks
+# before anyone reads the log. bin is never moved: a newer `ha` from
+# persist-install --ha-cli is there on purpose (tests/test-alpine-migration.sh).
+move_stale_persisted_libs() {
+    local root="${PERSIST_ROOT:-/data/packages}"
+    local system="${SYSTEM_ROOT:-}"
+    local quarantine file name copy has_system identical target
+    local -a moved=()
+
+    persisted_alpine_releases
+    [ -n "$ALPINE_RELEASE_CURRENT" ] || return 0
+    [ "$ALPINE_RELEASE_PREVIOUS" != "$ALPINE_RELEASE_CURRENT" ] || return 0
+    quarantine="$root/stale-alpine-$ALPINE_RELEASE_PREVIOUS/lib"
+
+    for file in "$root"/lib/*; do
+        [ -f "$file" ] || continue
+        name=${file##*/}
+        has_system=false
+        identical=false
+        for copy in "$system/usr/lib/$name" "$system/lib/$name"; do
+            [ -f "$copy" ] || continue
+            has_system=true
+            if cmp -s "$file" "$copy"; then
+                identical=true
+            fi
+        done
+        [ "$has_system" = true ] && [ "$identical" = false ] || continue
+        # Never overwrite an earlier quarantined copy of the same name.
+        target="$quarantine/$name"
+        [ ! -e "$target" ] || target="$quarantine/$name.$(date +%s).$$"
+        if mkdir -p "$quarantine" && mv "$file" "$target"; then
+            moved+=("$name")
+        else
+            bashio::log.warning "Could not move the stale library copy $file out of the way"
+        fi
+    done
+
+    if [ "${#moved[@]}" -gt 0 ]; then
+        bashio::log.warning "The base image moved from Alpine $ALPINE_RELEASE_PREVIOUS to $ALPINE_RELEASE_CURRENT. These library copies from persist-install would have replaced the system's own and were moved to $quarantine: ${moved[*]}"
+    fi
+}
+
+# After the package installs: name the files persist-install copied on an
+# older Alpine release, so they can be reinstalled, then record the current
+# release. Packages from the app options were just installed into the system
+# and copied again, so an identical system file means the copy is current.
+# bin/ha from persist-install --ha-cli is a static download, not tied to the
+# release. Adapted from nsleigh (ESJavadex/claude-code-ha@a1f0f2da).
+check_persisted_alpine_release() {
+    local root="${PERSIST_ROOT:-/data/packages}"
+    local system="${SYSTEM_ROOT:-}"
+    local file name dir current
+    local -a stale=()
+
+    persisted_alpine_releases
+    [ -n "$ALPINE_RELEASE_CURRENT" ] || return 0
+
+    if [ "$ALPINE_RELEASE_PREVIOUS" != "$ALPINE_RELEASE_CURRENT" ]; then
+        for file in "$root"/bin/* "$root"/lib/*; do
+            [ -f "$file" ] || continue
+            name=${file##*/}
+            if [ "$file" = "$root/bin/ha" ] && [ -f "$root/bin/.ha-version" ]; then
+                continue
+            fi
+            current=false
+            for dir in usr/bin usr/sbin bin sbin usr/lib lib; do
+                if cmp -s "$file" "$system/$dir/$name"; then
+                    current=true
+                    break
+                fi
+            done
+            [ "$current" = true ] || stale+=("$name")
+        done
+        if [ "${#stale[@]}" -gt 0 ]; then
+            bashio::log.warning "The base image moved from Alpine $ALPINE_RELEASE_PREVIOUS to $ALPINE_RELEASE_CURRENT. These files were installed with persist-install on $ALPINE_RELEASE_PREVIOUS and may not work; reinstall their packages: ${stale[*]}"
+        fi
+    fi
+
+    if [ "$(cat "$root/.alpine-release" 2>/dev/null || true)" != "$ALPINE_RELEASE_CURRENT" ]; then
+        if ! { mkdir -p "$root" && printf '%s\n' "$ALPINE_RELEASE_CURRENT" > "$root/.alpine-release"; } 2>/dev/null; then
+            bashio::log.warning "Could not record the Alpine release in $root/.alpine-release"
+        fi
+    fi
+}
+
+# The persist-install venv in /data belongs to the Python that created it. When
+# the base image brings a new one (Alpine 3.21's 3.12 -> 3.24's 3.14), its
+# packages stop importing and its own pip breaks, while venv/bin/python still
+# resolves - to the new interpreter. So: list what was installed by name (pip's
+# REQUESTED marker, the same rule as app-migration/apply.js; dependencies come
+# back with them; no marker at all means everything), write that list to
+# .reinstall-pending next to the venv, recreate the venv, then work the list
+# off. Whatever fails (no network at boot) stays on the list and is retried on
+# the next start, so an offline start does not lose the packages; after three
+# failed starts the rest moves to .reinstall-failed, so a package that can't
+# come back (no build for the new Python) does not delay every start for good.
+# Packages installed from a path, URL or git (PEP 610 direct_url.json) are not
+# fetched by name - PyPI would serve a different package of that name, or
+# none - but named for a manual reinstall. Runs after the panel is up and
+# before the options' pip packages are installed. Adapted from nsleigh
+# (ESJavadex/claude-code-ha@a1f0f2da); the REQUESTED rule, the retry list and
+# the direct_url check are our own (tests/test-alpine-migration.sh).
+# PERSIST_VENV and PYTHON_BIN are overridable for tests only.
+migrate_python_venv() {
+    local venv="${PERSIST_VENV:-/data/packages/python/venv}"
+    local python="${PYTHON_BIN:-python3}"
+    local state_dir="${venv%/*}"
+    local pending="$state_dir/.reinstall-pending"
+    local tries_file="$state_dir/.reinstall-tries"
+    local given_up="$state_dir/.reinstall-failed"
+    local max_tries=3
+    local old new meta name tries has_requested=false
+    local -a all=() requested=() manual=() list=() failed=()
+
+    if [ -f "$venv/pyvenv.cfg" ]; then
+        old=$(sed -n -E '/^version(_info)? *=/{s/^version(_info)? *= *([0-9]+\.[0-9]+).*/\2/p;q;}' \
+            "$venv/pyvenv.cfg") || old=''
+        new=$("$python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null) || new=''
+        if [ -n "$old" ] && [ -n "$new" ] && [ "$old" != "$new" ]; then
+            for meta in "$venv/lib/python$old/site-packages"/*.dist-info/METADATA; do
+                [ -f "$meta" ] || continue
+                name=$(sed -n '/^Name:/{s/^Name:[[:space:]]*//;p;q;}' "$meta" | tr -d '\r[:space:]') || name=''
+                case "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" in
+                    ''|pip|setuptools|wheel) continue ;;
+                esac
+                if [ -f "${meta%/METADATA}/REQUESTED" ]; then
+                    has_requested=true
+                fi
+                if [ -f "${meta%/METADATA}/direct_url.json" ]; then
+                    manual+=("$name")
+                    continue
+                fi
+                all+=("$name")
+                if [ -f "${meta%/METADATA}/REQUESTED" ]; then
+                    requested+=("$name")
+                fi
+            done
+            if [ "$has_requested" = true ]; then
+                list=("${requested[@]}")
+            else
+                list=("${all[@]}")
+            fi
+            # Written to a new file and renamed, so a full disk never leaves a
+            # cut-off name on the list.
+            if [ "${#list[@]}" -gt 0 ] && ! { { cat "$pending" 2>/dev/null || true; printf '%s\n' "${list[@]}"; } \
+                    > "$pending.new" && mv -f "$pending.new" "$pending"; } 2>/dev/null; then
+                rm -f "$pending.new"
+                bashio::log.error "Python changed from $old to $new, but the package list could not be saved to $pending; keeping the old venv"
+                return 0
+            fi
+            bashio::log.warning "Python changed from $old to $new: rebuilding the persist-install venv in $venv"
+            if [ "${#manual[@]}" -gt 0 ]; then
+                bashio::log.warning "Installed from a path, URL or git, so not reinstalled automatically - reinstall by hand with persist-install --python: ${manual[*]}"
+            fi
+            rm -rf "$venv"
+            if ! "$python" -m venv "$venv"; then
+                rm -rf "$venv"
+                bashio::log.error "Could not create the Python venv in $venv; its packages stay listed in $pending for the next start"
+                return 0
+            fi
+        fi
+    fi
+
+    [ -f "$pending" ] || return 0
+    if [ ! -x "$venv/bin/pip" ]; then
+        rm -rf "$venv"
+        if ! "$python" -m venv "$venv"; then
+            rm -rf "$venv"
+            bashio::log.error "Could not create the Python venv in $venv; its packages stay listed in $pending for the next start"
+            return 0
+        fi
+    fi
+
+    bashio::log.info "Reinstalling Python packages into the persist-install venv..."
+    while IFS= read -r name || [ -n "$name" ]; do
+        name=${name//[[:space:]]/}
+        [ -n "$name" ] || continue
+        bashio::log.info "  Reinstalling: $name"
+        # stdin from /dev/null: pip must not eat the rest of the list
+        run_with_timeout "$STARTUP_PIP_TIMEOUT" "Reinstall of $name" \
+            "$venv/bin/pip" install -q "$name" < /dev/null || failed+=("$name")
+    done < "$pending"
+
+    if [ "${#failed[@]}" -eq 0 ]; then
+        rm -f "$pending" "$tries_file"
+        return 0
+    fi
+
+    tries=$(cat "$tries_file" 2>/dev/null) || tries=0
+    case "$tries" in ''|*[!0-9]*) tries=0 ;; esac
+    tries=$((tries + 1))
+    if [ "$tries" -ge "$max_tries" ]; then
+        if ! { printf '%s\n' "${failed[@]}" >> "$given_up" && rm -f "$pending" "$tries_file"; } 2>/dev/null; then
+            bashio::log.warning "Could not move the reinstall list to $given_up"
+        fi
+        bashio::log.warning "Gave up reinstalling after $max_tries starts: ${failed[*]} (listed in $given_up). Reinstall by hand with: persist-install --python ${failed[*]}"
+        return 0
+    fi
+    if ! { printf '%s\n' "${failed[@]}" > "$pending.new" && mv -f "$pending.new" "$pending" \
+            && printf '%s\n' "$tries" > "$tries_file"; } 2>/dev/null; then
+        bashio::log.warning "Could not update $pending"
+    fi
+    bashio::log.warning "Could not reinstall: ${failed[*]}. The next start tries again (attempt $tries of $max_tries), or run: persist-install --python ${failed[*]}"
+}
+
 # Setup tmux configuration and session wrapper
 setup_tmux() {
     local tmux_conf="${HOME}/.tmux.conf"
     local tmux_mouse
     local tmux_wrapper="${TMUX_WRAPPER_PATH:-/usr/local/bin/tmux-claude}"
 
-    tmux_mouse=$(bashio::config 'tmux_mouse' 'false')
+    tmux_mouse=$(read_option 'tmux_mouse' 'false')
     case "${tmux_mouse:-false}" in
         true|on|yes|1) tmux_mouse="on" ;;
         *) tmux_mouse="off" ;;
@@ -400,8 +650,8 @@ setup_persistent_claude() {
     local native_bin_link="${CLAUDE_NATIVE_BIN_LINK:-/data/home/.local/bin/claude}"
     local claude_npm_spec="@anthropic-ai/claude-code@latest"
 
-    use_persistent_claude=$(bashio::config 'use_persistent_claude' 'false')
-    auto_update_claude_on_start=$(bashio::config 'auto_update_claude_on_start' 'false')
+    use_persistent_claude=$(read_option 'use_persistent_claude' 'false')
+    auto_update_claude_on_start=$(read_option 'auto_update_claude_on_start' 'false')
 
     # Exported so the session picker knows whether to offer a manual
     # "Update Claude Code" menu option.
@@ -524,9 +774,14 @@ auto_install_packages() {
     local package
     local persist_install="${PERSIST_INSTALL_BIN:-/usr/local/bin/persist-install}"
     local -a pip_package_list=()
+    local apk_raw pip_raw
 
-    apk_packages=$(normalize_config_list "$(bashio::config 'persistent_apk_packages' '')")
-    pip_packages=$(normalize_config_list "$(bashio::config 'persistent_pip_packages' '')")
+    # Read into own assignments: as an argument of normalize_config_list a
+    # failed read would vanish without a trace (see read_option).
+    apk_raw=$(read_option 'persistent_apk_packages' '')
+    pip_raw=$(read_option 'persistent_pip_packages' '')
+    apk_packages=$(normalize_config_list "$apk_raw")
+    pip_packages=$(normalize_config_list "$pip_raw")
 
     if [ -n "$apk_packages" ]; then
         bashio::log.info "Auto-installing system packages from config..."
@@ -566,10 +821,10 @@ get_claude_launch_command() {
     local claude_flags=""
 
     # Get configuration values
-    auto_launch_claude=$(bashio::config 'auto_launch_claude' 'true')
-    dangerously_skip_permissions=$(bashio::config 'dangerously_skip_permissions' 'false')
-    remote_control=$(bashio::config 'remote_control' 'false')
-    remote_control_session_name=$(bashio::config 'remote_control_session_name' '')
+    auto_launch_claude=$(read_option 'auto_launch_claude' 'true')
+    dangerously_skip_permissions=$(read_option 'dangerously_skip_permissions' 'false')
+    remote_control=$(read_option 'remote_control' 'false')
+    remote_control_session_name=$(read_option 'remote_control_session_name' '')
 
     # Claude Code hangs without a word on CPUs without x86-64-v2 (cpu-check.sh);
     # open the session picker instead, which explains it.
@@ -641,7 +896,14 @@ get_claude_launch_command() {
 prune_uploaded_images() {
     local value days removed
 
-    value=$(bashio::config 'image_retention_days' '30')
+    # No default here: this option deletes. If the read fails, the schema
+    # default 30 would delete images of a user who set 0 (keep all), so an
+    # unreadable value deletes nothing this time (tests/test-production-run.sh).
+    value=$(read_option 'image_retention_days' '')
+    if [ -z "$value" ]; then
+        bashio::log.warning "image_retention_days could not be read; keeping all uploaded images this time"
+        return 0
+    fi
     case "$value" in
         ''|*[!0-9]*) days=-1 ;;
         *) [ "${#value}" -le 4 ] && days=$((10#$value)) || days=-1 ;;
@@ -669,9 +931,10 @@ prune_uploaded_images() {
 # Write auto-continue's initial state from the option. Must run before the
 # image service starts; a failure only logs, the panel matters more.
 init_auto_continue() {
-    local state=off
+    local state=off value
 
-    [ "$(bashio::config 'auto_continue' 'false')" = "true" ] && state=on
+    value=$(read_option 'auto_continue' 'false')
+    [ "$value" = "true" ] && state=on
     if ! { mkdir -p "$AUTO_CONTINUE_DIR" && printf '%s\n' "$state" > "$AUTO_CONTINUE_DIR/auto-continue"; } 2>/dev/null; then
         bashio::log.warning "Could not write the auto-continue switch to ${AUTO_CONTINUE_DIR}; auto-continue stays off"
         return 0
@@ -837,7 +1100,7 @@ start_web_terminal() {
 
     # Log the configuration being used
     local auto_launch_claude
-    auto_launch_claude=$(bashio::config 'auto_launch_claude' 'true')
+    auto_launch_claude=$(read_option 'auto_launch_claude' 'true')
     bashio::log.info "Auto-launch Claude: ${auto_launch_claude}"
 
     # Export launch command so the tmux-claude wrapper and session can access it
@@ -886,6 +1149,7 @@ main() {
 
     init_environment
     install_tools
+    move_stale_persisted_libs
     prune_uploaded_images
     init_auto_continue
     # Serve the panel before the slow, network-bound steps below - the health
@@ -903,7 +1167,9 @@ main() {
     run_health_check
 
     setup_session_picker
+    migrate_python_venv
     setup_persistent_packages
+    check_persisted_alpine_release
     detect_app_migration
     start_web_terminal
 }

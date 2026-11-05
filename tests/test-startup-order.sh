@@ -42,6 +42,29 @@ done
 [ "$(line_of setup_persistent_claude)" -lt "$(line_of run_health_check)" ] || \
     fail "the health check must run after setup_persistent_claude, on the Claude the session uses"
 
+# Alpine release change: stale library copies leave LD_LIBRARY_PATH before
+# node (the image service) starts; the warning about the rest comes after the
+# package installs, which refresh the copies of the configured packages.
+for step in init_environment move_stale_persisted_libs check_persisted_alpine_release; do
+    [ -n "$(line_of "$step")" ] || fail "main() does not call $step"
+done
+[ "$(line_of init_environment)" -lt "$(line_of move_stale_persisted_libs)" ] || \
+    fail "move_stale_persisted_libs needs the environment from init_environment"
+[ "$(line_of move_stale_persisted_libs)" -lt "$(line_of start_image_service)" ] || \
+    fail "stale library copies must leave LD_LIBRARY_PATH before node starts"
+[ "$(line_of setup_persistent_packages)" -lt "$(line_of check_persisted_alpine_release)" ] || \
+    fail "check_persisted_alpine_release must run after the package installs"
+[ "$(line_of check_persisted_alpine_release)" -lt "$(line_of start_web_terminal)" ] || \
+    fail "check_persisted_alpine_release must run before start_web_terminal (exec)"
+
+# The venv rebuild needs the network (pip), so the panel comes first; the
+# options' pip packages must land in the rebuilt venv, not the old one.
+[ -n "$(line_of migrate_python_venv)" ] || fail "main() does not call migrate_python_venv"
+[ "$(line_of start_image_service)" -lt "$(line_of migrate_python_venv)" ] || \
+    fail "the image service must start before the venv rebuild"
+[ "$(line_of migrate_python_venv)" -lt "$(line_of setup_persistent_packages)" ] || \
+    fail "the venv must be rebuilt before the options' pip packages are installed"
+
 # grep without -q: an early exit would SIGPIPE sed, and under pipefail a
 # found line would read as "not there".
 if sed -n '/^start_web_terminal() {/,/^}/p' "$run_sh" | grep 'start_image_service' > /dev/null; then

@@ -252,6 +252,38 @@ ls -la /data/packages/lib/
 # (requires all dependencies to be in persistent storage)
 ```
 
+### After an update to a new Alpine release
+
+The app's base image moves to a new Alpine release from time to time (3.6.0:
+Alpine 3.21 → 3.24, which brings Python 3.12 → 3.14). What persist-install
+put into `/data/packages` came from the old release, so the first start after
+such an update takes care of it and says so in the app log:
+
+- **Python packages:** the venv belongs to the Python that created it. When the
+  Python version changes, the app lists the packages you installed by name,
+  rebuilds the venv and reinstalls them (log: `Python changed from 3.12 to
+  3.14: rebuilding ...`, then `Reinstalling: ...`). This needs the network. A
+  package that fails stays listed in `/data/packages/python/.reinstall-pending`
+  and is tried again on the next start; the log also names the
+  `persist-install --python ...` command to run by hand. After three failed
+  starts the app gives up and moves the rest to `.reinstall-failed`; delete
+  `.reinstall-pending` to stop the retries sooner. Packages you installed from
+  a local path, a URL or git are not fetched again by name; the log names them
+  for a manual reinstall.
+- **Libraries the system also has** (if any): `/data/packages/lib` comes first
+  on `LD_LIBRARY_PATH`, so an old copy of a system library would replace the
+  new one for every program, the app's own included. Such copies are moved to
+  `/data/packages/stale-alpine-<old release>/lib` (nothing is deleted).
+- **Other files** (if any): the log lists the binaries and libraries that were installed
+  on the old release and have no identical copy in the system: `These files
+  were installed with persist-install on 3.21 and may not work; reinstall their
+  packages: ...`. Run `persist-install <package>` again for those. Packages
+  listed in the `persistent_apk_packages` option are reinstalled on every start
+  anyway, and `ha` from `persist-install --ha-cli` is not tied to the release.
+
+Once you have checked that everything works, you can delete the
+`stale-alpine-*` folder.
+
 ### Clean slate (remove all packages)
 
 ```bash
