@@ -103,7 +103,7 @@ read_option() {
             bashio::config "$1" "$2"
         ) || value=''
         if [ -z "$value" ] && [ $((SECONDS - started)) -ge "$OPTION_READ_TIMEOUT" ]; then
-            : > "$OPTION_READ_GAVE_UP" 2>/dev/null || true
+            { : > "$OPTION_READ_GAVE_UP"; } 2>/dev/null || true
             bashio::log.warning "The Supervisor did not answer within ${OPTION_READ_TIMEOUT}s; the app options use their defaults for this start"
         fi
     fi

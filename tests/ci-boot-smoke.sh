@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # CI only (needs Docker; not part of run-tests.sh): boot the real image the way
 # the Supervisor would, but against a Supervisor that accepts connections and
-# never answers (3.6.1, n11). Every bashio::config call then runs into
-# read_option's time limit and fails, which is also the path bashio 0.19.0
-# (Alpine 3.24 base) turned into a startup abort. /data is seeded like an
+# never answers (3.6.1, n11). The first option read runs into read_option's
+# time limit and fails - the path bashio 0.19.0 (Alpine 3.24 base) turned into
+# a startup abort - and the others take their default at once. /data is seeded like an
 # install coming from Alpine 3.21: a Python 3.12 venv with one package, and a
 # broken copy of libstdc++ that persist-install might have left in
 # /data/packages/lib. A second start then finds a broken copy again WITHOUT a
@@ -94,6 +94,19 @@ docker network create "$network" >/dev/null
 docker run -d --name "$silent" --network "$network" --network-alias supervisor \
     --entrypoint node "$image" \
     -e "require('net').createServer(() => {}).listen(80)" >/dev/null
+# Wait until it listens: a read that finds the port closed fails at once and
+# would never reach the time limit.
+listening=false
+for _ in $(seq 1 30); do
+    if docker exec "$silent" node -e \
+            "require('net').connect(80, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))" \
+            >/dev/null 2>&1; then
+        listening=true
+        break
+    fi
+    sleep 1
+done
+[ "$listening" = true ] || fail "the stand-in Supervisor does not listen on port 80"
 
 # Starts the app container and waits for the panel and ttyd.
 boot() {

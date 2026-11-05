@@ -100,7 +100,15 @@ guarded() {
         "$@"
     ) &
     pid=$!
-    ( sleep 20; kill "$pid" 2>/dev/null ) &
+    # The watchdog ends its own sleep when stopped, so no orphaned sleep keeps
+    # a pipe on this suite's output open; nor do its descriptors.
+    (
+        trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+        sleep 20 &
+        nap=$!
+        wait "$nap"
+        kill "$pid" 2>/dev/null
+    ) > /dev/null 2>&1 &
     dog=$!
     wait "$pid" || status=$?
     kill "$dog" 2>/dev/null || true

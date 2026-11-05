@@ -143,9 +143,10 @@ jobs:
           build-args: |
             BUILD_ARCH=${{ matrix.arch }}
 
-      # Boots the real image against a Supervisor that never answers (every
-      # option read runs into its time limit), with /data as Alpine 3.21 left
-      # it, then once more with a broken library copy; see the script's header.
+      # Boots the real image against a Supervisor that never answers (one
+      # option read runs into its time limit, the others take their default),
+      # with /data as Alpine 3.21 left it, then once more with a broken library
+      # copy; see the script's header.
       - name: Boot the image against a silent Supervisor
         if: matrix.arch == 'amd64'
         run: tests/ci-boot-smoke.sh local/claude-workbench:ci

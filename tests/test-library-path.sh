@@ -5,6 +5,8 @@
 # the tmux server. The session 'claude' gets it through its tmux session
 # environment, from both places that create the session.
 set -euo pipefail
+# Like bashio 0.19.0, which run.sh runs under.
+shopt -s inherit_errexit
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 run_sh="$repo_root/claude-workbench/run.sh"
@@ -19,12 +21,17 @@ fail() {
 
 persist_lib=/data/packages/lib
 
-# 1. run.sh exports LD_LIBRARY_PATH for nothing it starts itself. The profile
-# script it writes for login shells keeps the folder.
-own_exports=$(sed "/<< 'PROFILE_EOF'/,/^PROFILE_EOF/d" "$run_sh" | \
-    grep -E '^[[:space:]]*export[[:space:]]+LD_LIBRARY_PATH=' || true)
-[ -z "$own_exports" ] || \
-    fail "run.sh exports LD_LIBRARY_PATH for its own processes (node, ttyd, tmux server): $own_exports"
+# 1. run.sh sets LD_LIBRARY_PATH for nothing it starts itself, in any form
+# (export, a prefix assignment, env). Allowed: the profile script for login
+# shells, the tmux-claude wrapper and the `new-session -e` value - all for the
+# terminal session. Comments do not count.
+own_settings=$(sed -e "/<< 'PROFILE_EOF'/,/^PROFILE_EOF/d" \
+        -e "/<< 'WRAPPER_EOF'/,/^WRAPPER_EOF/d" "$run_sh" | \
+    grep -vE '^[[:space:]]*#' | \
+    grep -E 'LD_LIBRARY_PATH=|export[[:space:]]+LD_LIBRARY_PATH' | \
+    grep -vF -- '-e "LD_LIBRARY_PATH=$(terminal_library_path)"' || true)
+[ -z "$own_settings" ] || \
+    fail "run.sh sets LD_LIBRARY_PATH for its own processes (node, ttyd, tmux server): $own_settings"
 sed -n "/<< 'PROFILE_EOF'/,/^PROFILE_EOF/p" "$run_sh" | \
     grep -q "^export LD_LIBRARY_PATH=\"$persist_lib:" || \
     fail "the profile script for login shells must keep $persist_lib"
