@@ -59,6 +59,19 @@ grep -q 'libstdc++.so.6' "$warnings" || fail "the moved library must be named in
 [ -f "$persist/lib/libz.so.1" ] || fail "a library identical to the system copy must stay"
 [ -f "$persist/lib/pkgconfig/foo.pc" ] || fail "subdirectories of lib must be left alone"
 
+# A copy already quarantined under the same name is never overwritten.
+reset_tree
+printf 'older\n' > "$persist/lib/libstdc++.so.6"
+printf 'new\n' > "$system/usr/lib/libstdc++.so.6"
+mkdir -p "$persist/stale-alpine-3.21/lib"
+printf 'oldest\n' > "$persist/stale-alpine-3.21/lib/libstdc++.so.6"
+move_stale_persisted_libs
+grep -qx 'oldest' "$persist/stale-alpine-3.21/lib/libstdc++.so.6" || \
+    fail "an earlier quarantined copy must not be overwritten"
+[ "$(cat "$persist"/stale-alpine-3.21/lib/libstdc++.so.6.* 2>/dev/null)" = "older" ] || \
+    fail "the second copy must be kept under a new name"
+[ ! -e "$persist/lib/libstdc++.so.6" ] || fail "the second stale copy must still leave lib"
+
 # The same release as recorded: nothing moves, nothing is logged.
 reset_tree
 printf '3.24\n' > "$persist/.alpine-release"
@@ -200,6 +213,35 @@ rm -rf "$tmp_dir/python" "$PIP_LOG"
 printf '\nsix\n\n' > "$pending"
 migrate_python_venv
 [ "$(pip_calls)" = "six " ] || fail "blank lines in the list must be skipped, got: $(pip_calls)"
+
+# A package installed from a path, URL or git (PEP 610 direct_url.json) cannot
+# come back by name: PyPI would serve a different package of that name, or
+# nothing. It is named for a manual reinstall instead.
+old_venv Requests:requested mytool:requested
+printf '{"url": "file:///config/mytool"}\n' \
+    > "$venv/lib/python3.12/site-packages/mytool-1.0.dist-info/direct_url.json"
+migrate_python_venv
+[ "$(pip_calls)" = "Requests " ] || fail "a package from a path/URL must not be fetched by name, got: $(pip_calls)"
+grep -q 'mytool' "$warnings" || fail "a package from a path/URL must be named for a manual reinstall"
+[ ! -e "$pending" ] || fail "a package from a path/URL must not stay on the retry list"
+
+# A package that keeps failing is given up after three starts, so it does not
+# delay every start for good; what was given up is kept and named.
+old_venv six:requested
+for _ in 1 2 3; do
+    PIP_FAIL=six migrate_python_venv
+done
+[ ! -e "$pending" ] || fail "the retry list must be given up after three failed starts"
+grep -qx 'six' "$tmp_dir/python/.reinstall-failed" || fail "given-up packages must be kept in .reinstall-failed"
+grep -q 'Gave up' "$warnings" || fail "giving up must be logged"
+rm -f "$PIP_LOG"
+migrate_python_venv
+[ ! -e "$PIP_LOG" ] || fail "nothing may be retried after giving up"
+# A later success resets the count.
+old_venv six:requested
+PIP_FAIL=six migrate_python_venv
+migrate_python_venv
+[ ! -e "$tmp_dir/python/.reinstall-tries" ] || fail "a finished list must reset the retry count"
 
 # No venv at all (persist-install --python never used): nothing happens.
 rm -rf "$tmp_dir/python" "$PIP_LOG"

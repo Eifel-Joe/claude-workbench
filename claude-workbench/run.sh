@@ -371,7 +371,7 @@ persisted_alpine_releases() {
 move_stale_persisted_libs() {
     local root="${PERSIST_ROOT:-/data/packages}"
     local system="${SYSTEM_ROOT:-}"
-    local quarantine file name copy has_system identical
+    local quarantine file name copy has_system identical target
     local -a moved=()
 
     persisted_alpine_releases
@@ -392,7 +392,10 @@ move_stale_persisted_libs() {
             fi
         done
         [ "$has_system" = true ] && [ "$identical" = false ] || continue
-        if mkdir -p "$quarantine" && mv -f "$file" "$quarantine/"; then
+        # Never overwrite an earlier quarantined copy of the same name.
+        target="$quarantine/$name"
+        [ ! -e "$target" ] || target="$quarantine/$name.$(date +%s).$$"
+        if mkdir -p "$quarantine" && mv "$file" "$target"; then
             moved+=("$name")
         else
             bashio::log.warning "Could not move the stale library copy $file out of the way"
@@ -455,17 +458,26 @@ check_persisted_alpine_release() {
 # back with them; no marker at all means everything), write that list to
 # .reinstall-pending next to the venv, recreate the venv, then work the list
 # off. Whatever fails (no network at boot) stays on the list and is retried on
-# the next start, so an offline start does not lose the packages. Runs after
-# the panel is up and before the options' pip packages are installed. Adapted
-# from nsleigh (ESJavadex/claude-code-ha@a1f0f2da); the REQUESTED rule and the
-# retry list are our own (tests/test-alpine-migration.sh). PERSIST_VENV and
-# PYTHON_BIN are overridable for tests only.
+# the next start, so an offline start does not lose the packages; after three
+# failed starts the rest moves to .reinstall-failed, so a package that can't
+# come back (no build for the new Python) does not delay every start for good.
+# Packages installed from a path, URL or git (PEP 610 direct_url.json) are not
+# fetched by name - PyPI would serve a different package of that name, or
+# none - but named for a manual reinstall. Runs after the panel is up and
+# before the options' pip packages are installed. Adapted from nsleigh
+# (ESJavadex/claude-code-ha@a1f0f2da); the REQUESTED rule, the retry list and
+# the direct_url check are our own (tests/test-alpine-migration.sh).
+# PERSIST_VENV and PYTHON_BIN are overridable for tests only.
 migrate_python_venv() {
     local venv="${PERSIST_VENV:-/data/packages/python/venv}"
     local python="${PYTHON_BIN:-python3}"
-    local pending="${venv%/*}/.reinstall-pending"
-    local old new meta name
-    local -a all=() requested=() list=() failed=()
+    local state_dir="${venv%/*}"
+    local pending="$state_dir/.reinstall-pending"
+    local tries_file="$state_dir/.reinstall-tries"
+    local given_up="$state_dir/.reinstall-failed"
+    local max_tries=3
+    local old new meta name tries has_requested=false
+    local -a all=() requested=() manual=() list=() failed=()
 
     if [ -f "$venv/pyvenv.cfg" ]; then
         old=$(sed -n -E '/^version(_info)? *=/{s/^version(_info)? *= *([0-9]+\.[0-9]+).*/\2/p;q;}' \
@@ -478,21 +490,35 @@ migrate_python_venv() {
                 case "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" in
                     ''|pip|setuptools|wheel) continue ;;
                 esac
+                if [ -f "${meta%/METADATA}/REQUESTED" ]; then
+                    has_requested=true
+                fi
+                if [ -f "${meta%/METADATA}/direct_url.json" ]; then
+                    manual+=("$name")
+                    continue
+                fi
                 all+=("$name")
                 if [ -f "${meta%/METADATA}/REQUESTED" ]; then
                     requested+=("$name")
                 fi
             done
-            if [ "${#requested[@]}" -gt 0 ]; then
+            if [ "$has_requested" = true ]; then
                 list=("${requested[@]}")
             else
                 list=("${all[@]}")
             fi
-            if [ "${#list[@]}" -gt 0 ] && ! printf '%s\n' "${list[@]}" >> "$pending" 2>/dev/null; then
+            # Written to a new file and renamed, so a full disk never leaves a
+            # cut-off name on the list.
+            if [ "${#list[@]}" -gt 0 ] && ! { { cat "$pending" 2>/dev/null || true; printf '%s\n' "${list[@]}"; } \
+                    > "$pending.new" && mv -f "$pending.new" "$pending"; } 2>/dev/null; then
+                rm -f "$pending.new"
                 bashio::log.error "Python changed from $old to $new, but the package list could not be saved to $pending; keeping the old venv"
                 return 0
             fi
             bashio::log.warning "Python changed from $old to $new: rebuilding the persist-install venv in $venv"
+            if [ "${#manual[@]}" -gt 0 ]; then
+                bashio::log.warning "Installed from a path, URL or git, so not reinstalled automatically - reinstall by hand with persist-install --python: ${manual[*]}"
+            fi
             rm -rf "$venv"
             if ! "$python" -m venv "$venv"; then
                 rm -rf "$venv"
@@ -523,13 +549,25 @@ migrate_python_venv() {
     done < "$pending"
 
     if [ "${#failed[@]}" -eq 0 ]; then
-        rm -f "$pending"
+        rm -f "$pending" "$tries_file"
         return 0
     fi
-    if ! { printf '%s\n' "${failed[@]}" > "$pending.new" && mv -f "$pending.new" "$pending"; } 2>/dev/null; then
+
+    tries=$(cat "$tries_file" 2>/dev/null) || tries=0
+    case "$tries" in ''|*[!0-9]*) tries=0 ;; esac
+    tries=$((tries + 1))
+    if [ "$tries" -ge "$max_tries" ]; then
+        if ! { printf '%s\n' "${failed[@]}" >> "$given_up" && rm -f "$pending" "$tries_file"; } 2>/dev/null; then
+            bashio::log.warning "Could not move the reinstall list to $given_up"
+        fi
+        bashio::log.warning "Gave up reinstalling after $max_tries starts: ${failed[*]} (listed in $given_up). Reinstall by hand with: persist-install --python ${failed[*]}"
+        return 0
+    fi
+    if ! { printf '%s\n' "${failed[@]}" > "$pending.new" && mv -f "$pending.new" "$pending" \
+            && printf '%s\n' "$tries" > "$tries_file"; } 2>/dev/null; then
         bashio::log.warning "Could not update $pending"
     fi
-    bashio::log.warning "Could not reinstall: ${failed[*]}. The next start tries again, or run: persist-install --python ${failed[*]}"
+    bashio::log.warning "Could not reinstall: ${failed[*]}. The next start tries again (attempt $tries of $max_tries), or run: persist-install --python ${failed[*]}"
 }
 
 # Setup tmux configuration and session wrapper

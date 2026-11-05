@@ -26,16 +26,18 @@
   and the venv's `pip` broke. The first start notices the version change,
   rebuilds the venv and reinstalls the packages you installed by name (this
   needs the network). Whatever fails stays on a list and is tried again on the
-  next start; the log names the command to do it by hand.
-- **Old library copies can't break the panel.** `/data/packages/lib` comes
-  first on `LD_LIBRARY_PATH`, so a 3.21 copy of a library the system also has
-  (libstdc++, for example) would have been loaded by the app's own Node.js
-  service too. Such copies are moved to `/data/packages/stale-alpine-3.21`
-  before the panel starts; nothing is deleted.
-- **The log names what to reinstall:** files installed with `persist-install`
-  on 3.21 that have no identical system copy, so you can run
-  `persist-install` for them again. See "After an update to a new Alpine
-  release" in `PERSISTENT_PACKAGES.md`.
+  next three starts; the log names the command to do it by hand. Packages
+  installed from a local path, a URL or git are named for a manual reinstall
+  instead of being fetched by name.
+- **Old library copies, if there are any, can't break the panel.**
+  `/data/packages/lib` comes first on `LD_LIBRARY_PATH`, so a 3.21 copy of a
+  library the system also has (libstdc++, for example) would have been loaded
+  by the app's own Node.js service too. Such copies are moved to
+  `/data/packages/stale-alpine-3.21` before the panel starts; nothing is
+  deleted.
+- **The log names what to reinstall,** if anything: files installed with
+  `persist-install` on 3.21 that have no identical system copy. See "After an
+  update to a new Alpine release" in `PERSISTENT_PACKAGES.md`.
 
 ### 🔧 Technical - CI boots the real image
 - The CI used to only build the images. It now boots the amd64 image without a

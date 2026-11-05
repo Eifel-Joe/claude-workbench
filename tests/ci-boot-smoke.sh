@@ -75,6 +75,9 @@ mkdir -p "$site" "$data/packages/lib" "$config"
 printf 'home = /usr/bin\ninclude-system-site-packages = false\nversion = 3.12.16\n' \
     > "$data/packages/python/venv/pyvenv.cfg"
 printf 'Metadata-Version: 2.1\nName: six\nVersion: 1.16.0\n' > "$site/METADATA"
+# Like a real venv: bin/python3 points at the system interpreter.
+mkdir -p "$data/packages/python/venv/bin"
+ln -s /usr/bin/python3 "$data/packages/python/venv/bin/python3"
 : > "$site/REQUESTED"
 printf 'not a library\n' > "$data/packages/lib/libstdc++.so.6"
 
