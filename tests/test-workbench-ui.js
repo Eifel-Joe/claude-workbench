@@ -313,6 +313,28 @@ test('installKeyBar restores the original label, not a hard-coded one', () => {
     assert.equal(ctrlC.getAttribute('aria-label'), 'Strg+C');
 });
 
+// A late timer (iOS throttles pages) must not leave the key announced as locked
+// when the guard's clock already allowed the next tap.
+test('installKeyBar keeps the original label when a late timer overlaps the next lock', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const clock = { t: 0 };
+    const timers = [];
+    ui.installKeyBar(bar, () => fakeTerm(), {
+        now: () => clock.t,
+        setTimeout: (fn) => timers.push(fn),
+    });
+    const ctrlC = bar.buttons['ctrl-c'];
+    bar.fire('click', ctrlC);
+    clock.t = 2000;                       // guard is free, first timer has not fired
+    bar.fire('click', ctrlC);
+    assert.equal(timers.length, 2);
+    timers[0]();                          // late first timer: second lock still running
+    assert.equal(ctrlC.getAttribute('aria-disabled'), 'true');
+    timers[1]();
+    assert.equal(ctrlC.getAttribute('aria-disabled'), null);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C');
+});
+
 test('installKeyBar gives a Ctrl+C button without a label none back', () => {
     const bar = fakeBar(ALL_KEYS);
     const ctrlC = bar.buttons['ctrl-c'];

@@ -132,6 +132,8 @@
         var windowMs = opts.ctrlCWindowMs === undefined ? 2000 : opts.ctrlCWindowMs;
         var allowCtrlC = createCtrlCGuard(opts.now, windowMs);
         var later = opts.setTimeout || function (fn, ms) { return setTimeout(fn, ms); };
+        var originalLabel = null;
+        var lockCount = 0;
 
         function keyButton(target) {
             for (var el = target; el && el !== bar; el = el.parentNode) {
@@ -161,17 +163,25 @@
                 if (!allowCtrlC()) return;
                 // Screen readers read aria-label, not the visible "wait": say
                 // the key is locked, and give back whatever label it had.
-                var label = button.getAttribute('aria-label');
+                // The guard counts on the clock, the restore on a timer; a
+                // throttled page can let the next tap in before the timer
+                // fires. So the original is read only when the key is not
+                // locked, and only the newest timer restores it.
+                if (button.getAttribute('aria-disabled') !== 'true') {
+                    originalLabel = button.getAttribute('aria-label');
+                }
+                var lock = ++lockCount;
                 button.textContent = 'wait';
                 button.classList.add('key-wait');
                 button.setAttribute('aria-disabled', 'true');
                 button.setAttribute('aria-label', LOCKED_LABEL);
                 later(function () {
+                    if (lock !== lockCount) return;
                     button.textContent = '^C';
                     button.classList.remove('key-wait');
                     button.removeAttribute('aria-disabled');
-                    if (label === null) button.removeAttribute('aria-label');
-                    else button.setAttribute('aria-label', label);
+                    if (originalLabel === null) button.removeAttribute('aria-label');
+                    else button.setAttribute('aria-label', originalLabel);
                 }, windowMs);
             }
             term.input(seq, true);
