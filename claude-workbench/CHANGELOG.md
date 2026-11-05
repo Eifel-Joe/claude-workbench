@@ -13,6 +13,13 @@
 - **Screen readers hear the locked ^C key as locked** during its two-second
   wait, and the original label comes back afterwards.
 
+### 📚 Credits
+- The key bar itself comes from mattbsea (mattbsea's heytcass fork, commit
+  `ed215953`), weiting-tw (`fe0a4ec9`) and marcjay (`f6674b77`), see 3.5.0.
+  The iPhone tap fix and the real-browser test are ESJavadex's. The callout,
+  home-bar and screen-reader changes are our own; no upstream or fork has
+  them.
+
 ### 🔧 Technical - Real-browser test
 - CI now taps the key bar with real touch input in Chromium and WebKit (new
   job `browser`, Playwright 1.64.1). The unit tests only simulate the
