@@ -53,9 +53,15 @@ try {
                 assert.equal(await frame.evaluate(() => document.activeElement === window.term.textarea), true,
                     `${engine.name()}: ${key} keeps terminal focus`);
             }
-            // A rapid second Ctrl+C is still ignored after a real touch tap.
-            await page.locator('[data-key="ctrl-c"]').tap();
+            // A rapid second Ctrl+C is still ignored after a real touch tap. The
+            // key is aria-disabled by now, so Playwright needs force to tap it
+            // the way a finger would.
+            await page.locator('[data-key="ctrl-c"]').tap({ force: true });
             assert.deepEqual(await frame.evaluate(() => window.sent), expected);
+            // While locked, assistive technology hears a locked key.
+            const ctrlC = page.locator('[data-key="ctrl-c"]');
+            assert.equal(await ctrlC.getAttribute('aria-disabled'), 'true', `${engine.name()}: ^C announced as disabled`);
+            assert.match(await ctrlC.getAttribute('aria-label'), /locked/, `${engine.name()}: ^C label says locked`);
             console.log(`PASS ${engine.name()}: all touch keys, terminal focus and Ctrl+C guard`);
         } finally {
             await browser.close();

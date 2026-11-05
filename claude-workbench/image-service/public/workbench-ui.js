@@ -113,6 +113,7 @@
     }
 
     var KEYBAR_FLAG = '__claudeKeyBarInstalled';
+    var LOCKED_LABEL = 'Ctrl+C, locked, wait a moment';
 
     /**
      * Wire the phone key bar. getTerm is asked on every tap: the ttyd frame
@@ -158,11 +159,19 @@
             if (seq === null) return;
             if (name === 'ctrl-c') {
                 if (!allowCtrlC()) return;
+                // Screen readers read aria-label, not the visible "wait": say
+                // the key is locked, and give back whatever label it had.
+                var label = button.getAttribute('aria-label');
                 button.textContent = 'wait';
                 button.classList.add('key-wait');
+                button.setAttribute('aria-disabled', 'true');
+                button.setAttribute('aria-label', LOCKED_LABEL);
                 later(function () {
                     button.textContent = '^C';
                     button.classList.remove('key-wait');
+                    button.removeAttribute('aria-disabled');
+                    if (label === null) button.removeAttribute('aria-label');
+                    else button.setAttribute('aria-label', label);
                 }, windowMs);
             }
             term.input(seq, true);

@@ -166,6 +166,10 @@ function fakeBar(keys) {
             dataset: { key: k },
             parentNode: bar,
             textContent: k === 'ctrl-c' ? '^C' : k,
+            attrs: { 'aria-label': k === 'ctrl-c' ? 'Ctrl+C' : k },
+            getAttribute(n) { return Object.prototype.hasOwnProperty.call(this.attrs, n) ? this.attrs[n] : null; },
+            setAttribute(n, v) { this.attrs[n] = String(v); },
+            removeAttribute(n) { delete this.attrs[n]; },
             classList: {
                 add: (c) => classes.add(c),
                 remove: (c) => classes.delete(c),
@@ -273,6 +277,52 @@ test('installKeyBar guards Ctrl+C and shows wait until it is free again', () => 
     clock.t = 2000;
     bar.fire('click', ctrlC);
     assert.equal(term.sent.length, 2);
+});
+
+test('installKeyBar announces the locked Ctrl+C as locked, then restores it', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const term = fakeTerm();
+    const clock = { t: 0 };
+    const timers = [];
+    ui.installKeyBar(bar, () => term, {
+        now: () => clock.t,
+        setTimeout: (fn, ms) => timers.push([fn, ms]),
+    });
+    const ctrlC = bar.buttons['ctrl-c'];
+    bar.fire('click', ctrlC);
+    assert.equal(ctrlC.getAttribute('aria-disabled'), 'true');
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C, locked, wait a moment');
+    // A refused second tap changes nothing and starts no second timer.
+    clock.t = 500;
+    bar.fire('click', ctrlC);
+    assert.equal(timers.length, 1);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C, locked, wait a moment');
+    timers[0][0]();
+    assert.equal(ctrlC.getAttribute('aria-disabled'), null);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C');
+});
+
+test('installKeyBar restores the original label, not a hard-coded one', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const ctrlC = bar.buttons['ctrl-c'];
+    ctrlC.attrs['aria-label'] = 'Strg+C';
+    const timers = [];
+    ui.installKeyBar(bar, () => fakeTerm(), { now: () => 0, setTimeout: (fn) => timers.push(fn) });
+    bar.fire('click', ctrlC);
+    timers[0]();
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Strg+C');
+});
+
+test('installKeyBar gives a Ctrl+C button without a label none back', () => {
+    const bar = fakeBar(ALL_KEYS);
+    const ctrlC = bar.buttons['ctrl-c'];
+    delete ctrlC.attrs['aria-label'];
+    const timers = [];
+    ui.installKeyBar(bar, () => fakeTerm(), { now: () => 0, setTimeout: (fn) => timers.push(fn) });
+    bar.fire('click', ctrlC);
+    assert.equal(ctrlC.getAttribute('aria-label'), 'Ctrl+C, locked, wait a moment');
+    timers[0]();
+    assert.equal(ctrlC.getAttribute('aria-label'), null);
 });
 
 test('installKeyBar installs once per bar', () => {
