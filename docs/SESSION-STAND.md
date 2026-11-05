@@ -1,5 +1,32 @@
 # Sitzungsstand
 
+## 2026-10-12 (17) — 3.5.0 Tastenleiste für das Handy (erster PR-Weg)
+
+### Stand
+- Spec `docs/specs/2026-10-12-mobile-key-bar-3.5.0-design.md`, Plan
+  `docs/plans/2026-10-12-mobile-key-bar-3.5.0.md`. Umgesetzt über Branch `feat/mobile-toolbar`
+  und den ersten PR im neuen Weg: Eifel-Joe/claude-workbench#1, Merge `362e31e8` auf `main`,
+  Release v3.5.0.
+- Tasten Esc, ↑, ↓, ↵, ⇧Tab, ^C (2-s-Schutz) über der Bildschirmtastatur, nur auf Touch-Geräten
+  (`any-pointer: coarse`); Logik in `workbench-ui.js` (`keySequence`, `createCtrlCGuard`,
+  `installKeyBar`). Credits: mattbsea `ed215953`, weiting-tw `fe0a4ec9`, marcjay `f6674b77`.
+- Offen: Handy-Test auf Prod (p04). Die Tastenleiste sendete auf dem iPhone nichts – das war
+  erst nach dem Release bekannt, Korrektur in 3.5.1.
+
+### Verworfen
+- Siehe Spec (Tastenauswahl, Ort, ^C ohne Schutz).
+
+### Fallen
+- Die Unit-Tests simulieren den Browser nur; der `pointerdown`-Fehler auf WebKit blieb deshalb
+  unentdeckt (und ein Test verlangte das falsche Verhalten). Seit 3.5.1 prüft `tests/browser`
+  mit echten Touch-Taps.
+
+### Nächste Schritte
+- 3.5.1 (Folgeeintrag).
+
+### Empfohlene Skills
+- `task-loop`, `pr-workflow`.
+
 ## 2026-10-12 (16) — Prod 3.4.1, claude-ha geprüft, PR-Weg, offene Punkte bereinigt
 
 ### Stand
