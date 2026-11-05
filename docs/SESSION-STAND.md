@@ -16,6 +16,11 @@
   `test-release-metadata.sh`, `test-startup-timeouts.sh`, `test-image-retention.sh`,
   `test-claude-assets.sh`, `test-npm-cache.sh`, `test-tmux-config.sh`, `test-auto-continue-cmd.sh`,
   der neue Option-Block aus `test-production-run.sh` isoliert; shellcheck wie CI.
+- Opus-Review: Fund 1 (wichtig) bestätigt und behoben. Mit `x=$(bashio::config k d) || x=d` liefert
+  bashio 0.19.0 eine **leere** Ausgabe mit Status 0, weil links von `||` errexit nicht greift. Neu ist
+  deshalb `read_option` mit `${value:-default}`. `image_retention_days` löscht bei unlesbarem Wert
+  nichts. Ebenfalls behoben: Pakete mit `direct_url.json`, Abbruch nach drei Starts, atomare Liste,
+  Quarantäne ohne Überschreiben, Doku „falls vorhanden“ (persist-install kopiert praktisch nichts).
 - unbestätigt bis CI: Boot-Test, Image-Builds amd64/aarch64, hadolint mit `apk upgrade`,
   `test-image-service.js` unter Node 24 (lokal alle 20 Tests grün, aber die Datei scheitert an einem
   `ECONNRESET` nach Testende im WebSocket-Test; vermutlich Windows, in der CI prüfen).
