@@ -210,7 +210,13 @@ init_environment() {
 
     # Setup persistent package paths (HIGHEST PRIORITY)
     export PATH="$persist_bin:$persist_python/venv/bin:$data_home/.local/bin:$PATH"
-    export LD_LIBRARY_PATH="$persist_lib:${LD_LIBRARY_PATH:-}"
+    # $persist_lib is deliberately NOT on run.sh's own LD_LIBRARY_PATH (n10):
+    # the loader searches it before the system's libraries, so one broken copy
+    # from persist-install took down node (the panel), ttyd and the tmux
+    # server. The terminal session gets it instead (terminal_library_path),
+    # login shells from the profile script below. Idea from unsnow-iac
+    # (ESJavadex/claude-code-ha 08686e1e), who re-added it before exec ttyd;
+    # here ttyd and the tmux server stay without it too.
     export PKG_CONFIG_PATH="$persist_lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
     # Python virtual environment if it exists
@@ -388,11 +394,11 @@ persisted_alpine_releases() {
 }
 
 # persist-install copies a package's shared libraries into /data/packages/lib,
-# which init_environment puts FIRST on LD_LIBRARY_PATH, for node (the image
-# service, the panel's entry point) as well. After the base image moves to a new
-# Alpine release, an old copy of a library the system also has (libstdc++,
-# sqlite-libs ...) would be loaded instead of the system's own: node can fail to
-# start, the panel stays blank and set -e ends startup. So, once per release
+# which the terminal session puts FIRST on LD_LIBRARY_PATH (terminal_library_path;
+# up to 3.6.0 run.sh did so for node, the panel's entry point, as well). After
+# the base image moves to a new Alpine release, an old copy of a library the
+# system also has (libstdc++, sqlite-libs ...) would be loaded instead of the
+# system's own: Claude and the user's programs can fail to start. So, once per release
 # change and before the image service starts, move every copy whose name the
 # system also has, with different content, to stale-alpine-<old>/lib. Nothing is
 # deleted. Copies without a system counterpart stay; check_persisted_alpine_release
@@ -654,12 +660,15 @@ source-file -q ~/.tmux.conf.local
 TMUX_EOF
 
     # Wrapper: attach to existing 'claude' session, or create a fresh one that runs the launch command
+    # Creates the session again once it ended; same session environment as in
+    # start_web_terminal (terminal_library_path).
     cat > "$tmux_wrapper" << 'WRAPPER_EOF'
 #!/bin/bash
 if tmux has-session -t claude 2>/dev/null; then
     exec tmux attach-session -t claude
 else
-    exec tmux new-session -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+    exec tmux new-session -e "LD_LIBRARY_PATH=/data/packages/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
 fi
 WRAPPER_EOF
     chmod +x "$tmux_wrapper"
@@ -1115,6 +1124,22 @@ with_migration_dialog() {
     fi
 }
 
+# LD_LIBRARY_PATH for the tmux session 'claude' (n10): the persist-install
+# libraries first, then whatever run.sh had. `tmux new-session -e` sets it in
+# the session environment, so every pane and window of the session has it -
+# Claude, which starts the user's programs (Bash commands, MCP servers, hooks),
+# the session picker and its bash - but not the tmux server, ttyd or node.
+# Claude keeps it: without it, a persist-install program whose libraries exist
+# only in /data/packages/lib would fail inside Claude. Rejected: CLAUDE_ENV_FILE
+# for Claude's Bash commands only (its interplay with SessionStart hooks is not
+# documented, MCP servers and hooks would still lack the folder). Ending the
+# session keeps the panel working: the session picker follows with a bash.
+# Keep in step with the tmux-claude wrapper (setup_tmux).
+# tests/test-library-path.sh, tests/ci-boot-smoke.sh.
+terminal_library_path() {
+    printf '%s\n' "/data/packages/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
 # Start main web terminal
 start_web_terminal() {
     local port=7681
@@ -1140,7 +1165,8 @@ start_web_terminal() {
     # Pre-create the persistent tmux session so the first browser connection is instant
     if ! tmux has-session -t claude 2>/dev/null; then
         bashio::log.info "Creating persistent tmux session 'claude'..."
-        tmux new-session -d -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+        tmux new-session -d -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
+            -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
     else
         bashio::log.info "Reusing existing tmux session 'claude'..."
     fi

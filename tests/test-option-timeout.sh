@@ -70,8 +70,11 @@ bashio::config() {
     printf '%s' "${response:-$2}"
 }
 
+# shellcheck disable=SC2034  # read by the sourced run.sh
 OPTION_READ_TIMEOUT=2
+# shellcheck disable=SC2034  # read by the sourced run.sh
 OPTION_READ_GAVE_UP="$tmp_dir/options-unanswered"
+# shellcheck disable=SC2034  # read by the sourced run.sh
 CLAUDE_RUN_SH_SKIP_MAIN=true
 # shellcheck source=/dev/null
 source "$repo_root/claude-workbench/run.sh"

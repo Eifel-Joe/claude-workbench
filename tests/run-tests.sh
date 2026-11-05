@@ -23,6 +23,7 @@ node --test "$tests_dir/test-auto-continue.js"
 "$tests_dir/test-auth-helper.sh"
 "$tests_dir/test-image-retention.sh"
 "$tests_dir/test-tmux-config.sh"
+"$tests_dir/test-library-path.sh"
 "$tests_dir/test-auto-continue-cmd.sh"
 
 # The image service is the ingress entry point. Its suite needs node and the
