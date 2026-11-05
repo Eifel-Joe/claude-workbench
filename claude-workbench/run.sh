@@ -330,6 +330,110 @@ install_tools() {
     bashio::log.info "Tools installed successfully"
 }
 
+# The Alpine release of the base image (X.Y) and the one /data/packages was
+# last checked against. Without a marker it is 3.21: every release before 3.6.0
+# was built on it. Sets ALPINE_RELEASE_CURRENT (empty when unreadable) and
+# ALPINE_RELEASE_PREVIOUS. PERSIST_ROOT, SYSTEM_ROOT and ALPINE_RELEASE_FILE
+# are overridable for tests only (tests/test-alpine-migration.sh).
+persisted_alpine_releases() {
+    local root="${PERSIST_ROOT:-/data/packages}"
+    ALPINE_RELEASE_CURRENT=$(cut -d. -f1,2 "${ALPINE_RELEASE_FILE:-/etc/alpine-release}" 2>/dev/null) || \
+        ALPINE_RELEASE_CURRENT=''
+    ALPINE_RELEASE_PREVIOUS=$(cat "$root/.alpine-release" 2>/dev/null) || ALPINE_RELEASE_PREVIOUS=''
+    [ -n "$ALPINE_RELEASE_PREVIOUS" ] || ALPINE_RELEASE_PREVIOUS='3.21'
+}
+
+# persist-install copies a package's shared libraries into /data/packages/lib,
+# which init_environment puts FIRST on LD_LIBRARY_PATH, for node (the image
+# service, the panel's entry point) as well. After the base image moves to a new
+# Alpine release, an old copy of a library the system also has (libstdc++,
+# sqlite-libs ...) would be loaded instead of the system's own: node can fail to
+# start, the panel stays blank and set -e ends startup. So, once per release
+# change and before the image service starts, move every copy whose name the
+# system also has, with different content, to stale-alpine-<old>/lib. Nothing is
+# deleted. Copies without a system counterpart stay; check_persisted_alpine_release
+# names them later. Rejected: only warning (nsleigh's version) - the panel breaks
+# before anyone reads the log. bin is never moved: a newer `ha` from
+# persist-install --ha-cli is there on purpose (tests/test-alpine-migration.sh).
+move_stale_persisted_libs() {
+    local root="${PERSIST_ROOT:-/data/packages}"
+    local system="${SYSTEM_ROOT:-}"
+    local quarantine file name copy has_system identical
+    local -a moved=()
+
+    persisted_alpine_releases
+    [ -n "$ALPINE_RELEASE_CURRENT" ] || return 0
+    [ "$ALPINE_RELEASE_PREVIOUS" != "$ALPINE_RELEASE_CURRENT" ] || return 0
+    quarantine="$root/stale-alpine-$ALPINE_RELEASE_PREVIOUS/lib"
+
+    for file in "$root"/lib/*; do
+        [ -f "$file" ] || continue
+        name=${file##*/}
+        has_system=false
+        identical=false
+        for copy in "$system/usr/lib/$name" "$system/lib/$name"; do
+            [ -f "$copy" ] || continue
+            has_system=true
+            if cmp -s "$file" "$copy"; then
+                identical=true
+            fi
+        done
+        [ "$has_system" = true ] && [ "$identical" = false ] || continue
+        if mkdir -p "$quarantine" && mv -f "$file" "$quarantine/"; then
+            moved+=("$name")
+        else
+            bashio::log.warning "Could not move the stale library copy $file out of the way"
+        fi
+    done
+
+    if [ "${#moved[@]}" -gt 0 ]; then
+        bashio::log.warning "The base image moved from Alpine $ALPINE_RELEASE_PREVIOUS to $ALPINE_RELEASE_CURRENT. These library copies from persist-install would have replaced the system's own and were moved to $quarantine: ${moved[*]}"
+    fi
+}
+
+# After the package installs: name the files persist-install copied on an
+# older Alpine release, so they can be reinstalled, then record the current
+# release. Packages from the app options were just installed into the system
+# and copied again, so an identical system file means the copy is current.
+# bin/ha from persist-install --ha-cli is a static download, not tied to the
+# release. Adapted from nsleigh (ESJavadex/claude-code-ha@a1f0f2da).
+check_persisted_alpine_release() {
+    local root="${PERSIST_ROOT:-/data/packages}"
+    local system="${SYSTEM_ROOT:-}"
+    local file name dir current
+    local -a stale=()
+
+    persisted_alpine_releases
+    [ -n "$ALPINE_RELEASE_CURRENT" ] || return 0
+
+    if [ "$ALPINE_RELEASE_PREVIOUS" != "$ALPINE_RELEASE_CURRENT" ]; then
+        for file in "$root"/bin/* "$root"/lib/*; do
+            [ -f "$file" ] || continue
+            name=${file##*/}
+            if [ "$file" = "$root/bin/ha" ] && [ -f "$root/bin/.ha-version" ]; then
+                continue
+            fi
+            current=false
+            for dir in usr/bin usr/sbin bin sbin usr/lib lib; do
+                if cmp -s "$file" "$system/$dir/$name"; then
+                    current=true
+                    break
+                fi
+            done
+            [ "$current" = true ] || stale+=("$name")
+        done
+        if [ "${#stale[@]}" -gt 0 ]; then
+            bashio::log.warning "The base image moved from Alpine $ALPINE_RELEASE_PREVIOUS to $ALPINE_RELEASE_CURRENT. These files were installed with persist-install on $ALPINE_RELEASE_PREVIOUS and may not work; reinstall their packages: ${stale[*]}"
+        fi
+    fi
+
+    if [ "$(cat "$root/.alpine-release" 2>/dev/null || true)" != "$ALPINE_RELEASE_CURRENT" ]; then
+        if ! { mkdir -p "$root" && printf '%s\n' "$ALPINE_RELEASE_CURRENT" > "$root/.alpine-release"; } 2>/dev/null; then
+            bashio::log.warning "Could not record the Alpine release in $root/.alpine-release"
+        fi
+    fi
+}
+
 # Setup tmux configuration and session wrapper
 setup_tmux() {
     local tmux_conf="${HOME}/.tmux.conf"
@@ -902,6 +1006,7 @@ main() {
 
     init_environment
     install_tools
+    move_stale_persisted_libs
     prune_uploaded_images
     init_auto_continue
     # Serve the panel before the slow, network-bound steps below - the health
@@ -920,6 +1025,7 @@ main() {
 
     setup_session_picker
     setup_persistent_packages
+    check_persisted_alpine_release
     detect_app_migration
     start_web_terminal
 }
