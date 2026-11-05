@@ -152,6 +152,7 @@ podman exec test-claude-dev chmod +x /opt/scripts/claude-session-picker.sh
 - **Indentation**: 2 spaces for YAML, 4 spaces for shell scripts
 - **Error Handling**: Use `bashio::log.error` for error reporting
 - **Permissions**: Credential files must have 600 permissions
+- **Option reads**: `run.sh` runs under `set -e`, and bashio 0.19.0 (Alpine 3.24 base) adds `inherit_errexit`, so `bashio::config` fails instead of returning its default when the Supervisor API can't be reached. Write every read as its own assignment with the same default as fallback: `x=$(bashio::config 'key' 'false') || x='false'`. Never read an option inside another command's argument (`"$(bashio::config …)"`): a failure there vanishes silently and leaves an empty value. `tests/test-production-run.sh` rejects any other form.
 
 ### Key Environment Variables
 - `HOME=/data/home`

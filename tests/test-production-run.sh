@@ -173,4 +173,46 @@ printf '%s\n' 'info|App migration: nothing to offer (state)' \
 cmp -s "$tmp_dir/migration.expected" "$tmp_dir/migration.log" || \
     fail "detect_app_migration must log WARNING: lines as warnings"
 
+# bashio 0.19.0 (Alpine 3.24 base) runs run.sh with inherit_errexit, so a
+# bashio::config whose Supervisor API call fails now fails itself. Under set -e
+# an unguarded `x=$(bashio::config ...)` ends startup, and inside
+# `"$(get_claude_launch_command)"` it silently empties the launch command. Every
+# read must fall back to its default. The subshell runs in the background
+# because bash ignores set -e in a subshell tested with || or if (technique from
+# nsleigh, ESJavadex/claude-code-ha@a1f0f2da).
+uploads="$tmp_dir/uploads"
+mkdir -p "$uploads"
+touch -d '40 days ago' "$uploads/pasted-old.png"
+touch "$uploads/pasted-new.png"
+(
+    set -euo pipefail
+    shopt -s inherit_errexit
+    bashio::config() { return 1; }
+    setup_tmux
+    grep -qx 'set -g mouse off' "$HOME/.tmux.conf"
+    launch=$(get_claude_launch_command)
+    [[ "$launch" == *"/usr/local/bin/claude"* ]]
+    setup_persistent_claude
+    [ "$USE_PERSISTENT_CLAUDE" = false ]
+    PERSIST_INSTALL_LOG="$tmp_dir/option-reads-install.log"
+    auto_install_packages
+    [ ! -e "$PERSIST_INSTALL_LOG" ]
+    IMAGE_UPLOAD_DIR="$uploads" prune_uploaded_images
+    # Separate lines: set -e ignores a failure on the left of &&.
+    [ ! -e "$uploads/pasted-old.png" ]
+    [ -e "$uploads/pasted-new.png" ]
+    AUTO_CONTINUE_DIR="$tmp_dir/auto-continue" init_auto_continue
+    [ "$(cat "$tmp_dir/auto-continue/auto-continue")" = off ]
+    echo survived > "$tmp_dir/option-reads"
+) &
+wait $! || true
+[ "$(cat "$tmp_dir/option-reads" 2>/dev/null)" = "survived" ] || \
+    fail "a failed option read must fall back to its default, not end startup"
+
+# Every option read is an assignment with its own default as the fallback.
+while IFS= read -r line; do
+    printf '%s\n' "$line" | grep -qE "^[[:space:]]*([a-z_]+)=\\\$\(bashio::config '[a-z_]+' '([^']*)'\) \|\| \1='\2'$" || \
+        fail "option read without its default as fallback: $line"
+done < <(grep -E 'bashio::config ' "$repo_root/claude-workbench/run.sh" | grep -vE '^[[:space:]]*#')
+
 echo "Production run.sh regression suite passed"
