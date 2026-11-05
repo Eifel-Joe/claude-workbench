@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/Eifel-Joe/claude-workbench?label=release&color=1f6feb)](https://github.com/Eifel-Joe/claude-workbench/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 [![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-8957e5)](#architecture-support)
-[![Base image](https://img.shields.io/badge/base-Alpine%203.21-0db7ed)](claude-workbench/Dockerfile)
+[![Base image](https://img.shields.io/badge/base-Alpine%203.24-0db7ed)](claude-workbench/Dockerfile)
 
 <img src="claude-workbench/logo.png" alt="Claude Workbench logo" width="96" align="right">
 

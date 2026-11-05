@@ -65,8 +65,8 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          # Same major as the image (Alpine 3.21 ships Node 22).
-          node-version: "22"
+          # Same major as the image (Alpine 3.24 ships Node 24).
+          node-version: "24"
           cache: npm
           cache-dependency-path: claude-workbench/image-service/package-lock.json
 
@@ -94,7 +94,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
           cache-dependency-path: tests/browser/package-lock.json
 

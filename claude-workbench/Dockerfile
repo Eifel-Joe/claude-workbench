@@ -2,7 +2,7 @@
 # of build.yaml, which the Supervisor deprecated. Deliberately no ARG BUILD_FROM:
 # older Supervisor versions pass their own default ({arch}-base:latest, the
 # newest Alpine) and would silently replace this base through it.
-FROM ghcr.io/home-assistant/base:3.21
+FROM ghcr.io/home-assistant/base:3.24
 
 LABEL \
     org.opencontainers.image.title="Home Assistant App: Claude Workbench" \
@@ -18,7 +18,11 @@ LABEL \
 # coreutils for GNU timeout: run.sh puts startup downloads under a time limit,
 # and BusyBox timeout signals only the process it started, so an `apk add` run
 # by persist-install would outlive the cut-off and keep the apk database locked.
-RUN apk add --no-cache \
+# apk upgrade first: the base image is only as fresh as its last publish, and
+# Alpine ships security fixes as package revisions in between (heytcass
+# 6641bfe0, from owine's fork; nsleigh, ESJavadex/claude-code-ha@a1f0f2da).
+RUN apk upgrade --no-cache \
+    && apk add --no-cache \
     coreutils \
     nodejs \
     npm \

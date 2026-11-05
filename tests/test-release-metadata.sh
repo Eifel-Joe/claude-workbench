@@ -35,6 +35,18 @@ from_lines=$(grep -iE '^[[:space:]]*FROM[[:space:]]' "$dockerfile" || true)
     fail "Dockerfile must have exactly one FROM; found: $(printf '%s' "$from_lines" | tr '\n' '|')"
 printf '%s\n' "$from_lines" | grep -qE '^FROM ghcr\.io/home-assistant/base:[0-9]+\.[0-9]+' || \
     fail "Dockerfile must start from a tagged ghcr.io/home-assistant/base image"
+# Alpine 3.21 is out of security support since 2026-11-01: never fall back
+# below 3.24. The docs that name the base must follow the Dockerfile.
+base_tag=$(printf '%s\n' "$from_lines" | sed -nE 's/^FROM ghcr\.io\/home-assistant\/base:([0-9]+\.[0-9]+).*/\1/p')
+[ "$(printf '%s\n' 3.24 "$base_tag" | sort -V | head -n 1)" = "3.24" ] || \
+    fail "Dockerfile base $base_tag is older than Alpine 3.24 (3.21 is end of life)"
+grep -q "badge/base-Alpine%20${base_tag}-" "$repo_root/README.md" || \
+    fail "README.md base image badge does not show Alpine $base_tag"
+grep -qF "Alpine Linux base (${base_tag})" "$addon_dir/README.md" || \
+    fail "claude-workbench/README.md does not name Alpine $base_tag as its base"
+grep -qF "base:${base_tag}" "$repo_root/CLAUDE.md" || \
+    fail "CLAUDE.md does not name ghcr.io/home-assistant/base:$base_tag"
+
 # Without build.yaml, older Supervisor versions still pass BUILD_FROM
 # ({arch}-base:latest, the newest Alpine). An ARG would let that replace the
 # pinned base without anyone noticing.

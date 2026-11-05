@@ -63,7 +63,7 @@ real image builds for amd64 and aarch64.
 
 ### Add-on Structure (claude-workbench/)
 - **config.yaml** - Home Assistant add-on configuration (version, arch list, ingress, options)
-- **Dockerfile** - Alpine-based container with Node.js and Claude Code CLI; pins the base image (`FROM ghcr.io/home-assistant/base:3.21`) and the image labels. There is no build.yaml (deprecated by the Supervisor).
+- **Dockerfile** - Alpine-based container with Node.js and Claude Code CLI; pins the base image (`FROM ghcr.io/home-assistant/base:3.24`) and the image labels. There is no build.yaml (deprecated by the Supervisor).
 - **run.sh** - Main startup script with credential management and ttyd terminal
 - **scripts/** - Modular credential management scripts
 
