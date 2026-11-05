@@ -284,3 +284,24 @@ test('installKeyBar installs once per bar', () => {
     assert.deepEqual(term.sent, [['\x1b', true]]);
     assert.equal(ui.installKeyBar(null, () => term), false);
 });
+
+// The look of the bar cannot run in node, so the rules are checked as text. The
+// effect on a real iPhone (no menu, clear of the home bar) is checked by hand.
+function cssBlock(selector) {
+    const html = require('node:fs').readFileSync(
+        path.join(__dirname, '..', 'claude-workbench', 'image-service', 'public', 'index.html'), 'utf8');
+    const start = html.indexOf('\n        ' + selector + ' {');
+    assert.notEqual(start, -1, 'rule not found: ' + selector);
+    return html.slice(start, html.indexOf('}', start));
+}
+
+test('key bar buttons show no iOS callout menu on a long press', () => {
+    const rule = cssBlock('#key-bar button');
+    assert.match(rule, /-webkit-touch-callout:\s*none;/);
+    assert.match(rule, /user-select:\s*none;/);
+});
+
+test('key bar keeps clear of the iPhone home bar', () => {
+    assert.match(cssBlock('#key-bar'),
+        /padding-bottom:\s*max\(4px,\s*env\(safe-area-inset-bottom\)\);/);
+});

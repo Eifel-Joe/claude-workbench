@@ -113,6 +113,8 @@
             flex-shrink: 0;
             gap: 4px;
             padding: 4px;
+            /* Clear of the iPhone home bar where iOS reports one; 4px elsewhere. */
+            padding-bottom: max(4px, env(safe-area-inset-bottom));
             background: #2d2d2d;
             border-top: 1px solid #3d3d3d;
         }
@@ -127,6 +129,8 @@
             font-size: 15px;
             font-family: inherit;
             touch-action: manipulation;
+            /* A long press must not open iOS's callout menu. */
+            -webkit-touch-callout: none;
             -webkit-user-select: none;
             user-select: none;
         }
