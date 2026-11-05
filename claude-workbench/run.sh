@@ -12,6 +12,12 @@ STARTUP_NPM_TIMEOUT="${STARTUP_NPM_TIMEOUT:-300}"
 STARTUP_APK_TIMEOUT="${STARTUP_APK_TIMEOUT:-300}"
 STARTUP_PIP_TIMEOUT="${STARTUP_PIP_TIMEOUT:-900}"
 
+# Time limit for one app option read from the Supervisor, and the marker that
+# says it ran out this start (see read_option). 10 s like the app migration's
+# Supervisor check (DETECT_TIMEOUT_MS). Overridable only for the tests.
+OPTION_READ_TIMEOUT="${OPTION_READ_TIMEOUT:-10}"
+OPTION_READ_GAVE_UP="${OPTION_READ_GAVE_UP:-/tmp/.claude-workbench-options-unanswered}"
+
 # npm's download cache; overridable for tests only (tests/test-npm-cache.sh).
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-/tmp/npm-cache}"
 NPM_LEGACY_CACHE_DIR="${NPM_LEGACY_CACHE_DIR:-/data/home/.npm}"
@@ -73,9 +79,34 @@ run_with_timeout() {
 # of Claude). No option has a non-empty default that a user could want to
 # replace with an empty value. tests/test-production-run.sh covers both
 # failure modes.
+#
+# Time limit (n11). Root cause: bashio::api.supervisor runs curl with no
+# --max-time, so a Supervisor that accepts the connection but never answers
+# held startup forever and the panel stayed blank. Fix: inside this command
+# substitution only, a curl function adds --max-time; curl ends itself, bashio
+# reports a failed call, the default applies. bashio caches no failure, so every
+# later read would wait again (13 reads); a read that ran into the limit leaves
+# a marker file - a variable would be lost, read_option always runs in $(...) -
+# and later reads take their default at once. main removes the marker. A fast
+# failure leaves none: every read tries on its own, as before. Told by the
+# elapsed time, because bashio does not pass curl's exit status on.
+# Rejected: `timeout` around the read (it cannot run a function, and through
+# `bash -c` it kills only bash: the orphaned curl keeps the $(...) pipe open
+# and the read still hangs), a watchdog subshell (same orphan), a curlrc
+# (applies to every curl of the environment). tests/test-option-timeout.sh.
 read_option() {
-    local value
-    value=$(bashio::config "$1" "$2") || value=''
+    local value=''
+    local started=$SECONDS
+    if [ ! -e "$OPTION_READ_GAVE_UP" ]; then
+        value=$(
+            curl() { command curl --max-time "$OPTION_READ_TIMEOUT" "$@"; }
+            bashio::config "$1" "$2"
+        ) || value=''
+        if [ -z "$value" ] && [ $((SECONDS - started)) -ge "$OPTION_READ_TIMEOUT" ]; then
+            : > "$OPTION_READ_GAVE_UP" 2>/dev/null || true
+            bashio::log.warning "The Supervisor did not answer within ${OPTION_READ_TIMEOUT}s; the app options use their defaults for this start"
+        fi
+    fi
     printf '%s\n' "${value:-$2}"
 }
 
@@ -1145,6 +1176,8 @@ run_health_check() {
 
 # Main execution
 main() {
+    # A restart in the same container asks the Supervisor again (read_option).
+    rm -f "$OPTION_READ_GAVE_UP"
     bashio::log.info "Initializing Claude Workbench app..."
 
     init_environment
