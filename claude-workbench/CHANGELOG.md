@@ -20,8 +20,9 @@
   caught that on a change of the Alpine release. Now only the terminal session
   gets the folder: Claude, the session picker, new tmux windows and login
   shells, where your packages run. Thanks to **unsnow-iac** for the idea of
-  keeping the folder off the app's own environment
-  (ESJavadex/claude-code-ha@08686e1e); here ttyd and tmux stay without it too.
+  keeping the folder off the app's own environment (commit `08686e1e`, found
+  in miczu71's fork, branch `history/unsnow-full`); here ttyd and tmux stay
+  without it too.
 
 ### 🔧 Technical
 - The CI boot test now runs the app next to a stand-in Supervisor that never

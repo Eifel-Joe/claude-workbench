@@ -215,7 +215,8 @@ init_environment() {
     # from persist-install took down node (the panel), ttyd and the tmux
     # server. The terminal session gets it instead (terminal_library_path),
     # login shells from the profile script below. Idea from unsnow-iac
-    # (ESJavadex/claude-code-ha 08686e1e), who re-added it before exec ttyd;
+    # (commit 08686e1e, found in miczu71's fork, branch history/unsnow-full),
+    # who re-added it before exec ttyd;
     # here ttyd and the tmux server stay without it too.
     export PKG_CONFIG_PATH="$persist_lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 
