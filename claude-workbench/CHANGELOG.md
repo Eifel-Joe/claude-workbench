@@ -20,6 +20,11 @@
   home-bar and screen-reader changes are our own; no upstream or fork has
   them.
 
+### 🔧 Technical - Dependency security updates
+- **Image service libraries updated** to clear two new high-severity advisories
+  (body-parser 1.20.9 for GHSA-27r3-jxmh-p828, multer 2.5.0 for
+  GHSA-q7qp-rjg7-q26m; also express 4.22.3 and qs 6.17.1). Lockfile only.
+
 ### 🔧 Technical - Real-browser test
 - CI now taps the key bar with real touch input in Chromium and WebKit (new
   job `browser`, Playwright 1.64.1). The unit tests only simulate the
