@@ -200,6 +200,9 @@ See the [changelog](CHANGELOG.md).
 **Maintainer:** [@Eifel-Joe](https://github.com/Eifel-Joe)
 **Claude Terminal Pro:** Javier Santos ([@ESJavadex](https://github.com/ESJavadex)) — persistent package management and many enhancements Claude Workbench builds on
 **Original Claude Terminal:** Tom Cassady ([@heytcass](https://github.com/heytcass)) — the initial app
+**Community forks and ideas:** [@owine](https://github.com/owine), [@mattbsea](https://github.com/mattbsea), [@nsleigh](https://github.com/nsleigh), [@unsnow-iac](https://github.com/unsnow-iac), [@marcjay](https://github.com/marcjay), [@weiting-tw](https://github.com/weiting-tw), [@umrath](https://github.com/umrath), [@martinboksa](https://github.com/martinboksa), [@Moulbi](https://github.com/Moulbi), [@PeterLinuxOSS](https://github.com/PeterLinuxOSS), [@msvinth](https://github.com/msvinth) — each change is credited in the [changelog](CHANGELOG.md)
+**Home Assistant plugin:** `homeassistant-config` by ESJavadex ([ESJavadex/claude-homeassistant-plugins](https://github.com/ESJavadex/claude-homeassistant-plugins), MIT)
+**Status line style:** [susomejias/claude-statusline](https://github.com/susomejias/claude-statusline) (MIT)
 
 Claude, Claude Code and the Claude spark logo are trademarks of Anthropic. Claude Workbench is an independent community project and is not made or endorsed by Anthropic.
 
