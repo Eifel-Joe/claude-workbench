@@ -111,7 +111,7 @@ grep -q 'Installing: null' "$log" && fail "the log shows an install of a package
 # 6b. Set package lists still install.
 set_options '{"persistent_apk_packages": ["git"], "persistent_pip_packages": ["requests"]}'
 auto_install_packages
-grep -qx 'git' "$persist_log" || fail "the apk package list was not installed: $(cat "$persist_log")"
+grep -qx -- '--apk git' "$persist_log" || fail "the apk package list was not installed: $(cat "$persist_log")"
 grep -qx -- '--python requests' "$persist_log" || \
     fail "the pip package list was not installed: $(cat "$persist_log")"
 

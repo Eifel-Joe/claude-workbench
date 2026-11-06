@@ -25,6 +25,19 @@ OPTION_READ_GAVE_UP="${OPTION_READ_GAVE_UP:-/tmp/.claude-workbench-options-unans
 # Overridable for tests only (tests/test-command-path.sh).
 PERSIST_PATHS="${PERSIST_PATHS:-/data/packages/bin:/data/packages/python/venv/bin:/data/home/.local/bin}"
 
+# What counts as one package in persistent_apk_packages / persistent_pip_packages
+# (n30, auto_install_packages). Both must start with a letter or digit, so no
+# entry can reach persist-install, apk or pip as a flag. apk: name, version pin
+# (git=2.47.0-r0), cmd:/so: provides, @repository tags. pip: name with extras and
+# version specifiers (pandas[all], foo>=1,<2). In variables without backslashes:
+# `]` first in the class is a literal `]`, `-` last a literal `-`.
+# From unsnow-iac (08686e1e, 83c6997e, found in miczu71's fork, branch
+# history/unsnow-full); `:` and `@` added for apk here. The app takeover uses
+# the same rules in scripts/app-migration/package-names.js
+# (tests/test-package-names.sh compares both).
+APK_NAME_RE='^[A-Za-z0-9][A-Za-z0-9._+=<>~:@-]*$'
+PIP_SPEC_RE='^[A-Za-z0-9][]A-Za-z0-9._+=!~,<>[-]*$'
+
 # npm's download cache; overridable for tests only (tests/test-npm-cache.sh).
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-/tmp/npm-cache}"
 NPM_LEGACY_CACHE_DIR="${NPM_LEGACY_CACHE_DIR:-/data/home/.npm}"
@@ -1156,21 +1169,42 @@ auto_install_packages() {
     apk_packages=$(normalize_config_list "$apk_raw")
     pip_packages=$(normalize_config_list "$pip_raw")
 
+    # Every entry is checked before persist-install gets it (n30). Its first
+    # argument picks the mode, so an entry like --ha-cli or -p, but also ha or
+    # python, started another mode, and an entry starting with - reached apk or
+    # pip as a flag. Entries that are not one package name are skipped with a
+    # warning (APK_NAME_RE, PIP_SPEC_RE); apk names go after --apk, where
+    # every name is a package. Rejected: checking in persist-install itself,
+    # which would also block deliberate manual calls such as
+    # `persist-install --python git+https://...`. Idea from unsnow-iac
+    # (08686e1e, 83c6997e). tests/test-package-names.sh.
     if [ -n "$apk_packages" ]; then
         bashio::log.info "Auto-installing system packages from config..."
         while IFS= read -r package; do
-            if [ -n "$package" ]; then
-                bashio::log.info "  Installing: $package"
-                run_with_timeout "$STARTUP_APK_TIMEOUT" "Auto-install of $package" \
-                    "$persist_install" "$package" || bashio::log.warning "Failed to install: $package"
+            package="${package#"${package%%[![:space:]]*}"}"
+            package="${package%"${package##*[![:space:]]}"}"
+            [ -n "$package" ] || continue
+            if [[ ! "$package" =~ $APK_NAME_RE ]]; then
+                bashio::log.warning "  Skipping '$package': not a package name (one package per entry)"
+                continue
             fi
+            bashio::log.info "  Installing: $package"
+            run_with_timeout "$STARTUP_APK_TIMEOUT" "Auto-install of $package" \
+                "$persist_install" --apk "$package" || bashio::log.warning "Failed to install: $package"
         done <<< "$apk_packages"
     fi
 
     if [ -n "$pip_packages" ]; then
         bashio::log.info "Auto-installing Python packages from config..."
         while IFS= read -r package; do
-            [ -n "$package" ] && pip_package_list+=("$package")
+            package="${package#"${package%%[![:space:]]*}"}"
+            package="${package%"${package##*[![:space:]]}"}"
+            [ -n "$package" ] || continue
+            if [[ ! "$package" =~ $PIP_SPEC_RE ]]; then
+                bashio::log.warning "  Skipping '$package': not a package name (one package per entry)"
+                continue
+            fi
+            pip_package_list+=("$package")
         done <<< "$pip_packages"
 
         if [ "${#pip_package_list[@]}" -gt 0 ]; then
