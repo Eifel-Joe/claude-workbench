@@ -698,7 +698,8 @@ if tmux has-session -t claude 2>/dev/null; then
     exec tmux attach-session -t claude
 else
     exec tmux new-session -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
-        -e "PATH=$(terminal_path)" -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+        -e "PATH=$(terminal_path)" -s claude \
+        /usr/bin/env "PATH=$(terminal_path)" /bin/bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
 fi
 WRAPPER_EOF
     } > "$tmux_wrapper"
@@ -1489,7 +1490,22 @@ terminal_library_path() {
 # miczu71's fork, branch history/unsnow-full), who put them first again before
 # exec ttyd; here ttyd and the tmux server stay on the boot PATH.
 # Both functions are copied into the tmux-claude wrapper (setup_tmux).
-# tests/test-command-path.sh, tests/ci-boot-smoke.sh.
+#
+# The first pane (3.6.3). Root cause: tmux 3.7c builds a pane's environment
+# from the session environment and then replaces PATH with the PATH of the
+# client running new-session, as long as that client is not attached
+# (spawn.c, "Then the PATH environment variable"). Both places that create
+# the session are such clients with the boot PATH, so `-e PATH=...` reached
+# the session environment (new windows) but not the first pane, where Claude
+# and the session picker run: 3.6.2 had the persistent folders last there.
+# Fix: the pane's command sets PATH itself, through /usr/bin/env, and runs
+# /bin/bash by its full path (a bash from persist-install does not replace
+# the session's). -e PATH stays for later windows. Only PATH is special in
+# tmux; -e LD_LIBRARY_PATH reaches the pane. Rejected: running new-session
+# with PATH=terminal_path in front - in start_web_terminal that call starts
+# the tmux server, which would then run with the persistent folders first.
+# tests/test-command-path.sh (case 6), tests/ci-boot-smoke.sh (pane's
+# /proc/<pid>/environ).
 path_without_persist() {
     local entry rest='' p skip
     local -a persist_dirs path_parts
@@ -1548,7 +1564,8 @@ start_web_terminal() {
     if ! tmux has-session -t claude 2>/dev/null; then
         bashio::log.info "Creating persistent tmux session 'claude'..."
         tmux new-session -d -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
-            -e "PATH=$(terminal_path)" -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+            -e "PATH=$(terminal_path)" -s claude \
+            /usr/bin/env "PATH=$(terminal_path)" /bin/bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
     else
         bashio::log.info "Reusing existing tmux session 'claude'..."
     fi

@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.6.3
+
+### 🐛 Bug Fix - Your persistent programs come first in Claude's terminal again
+- **In 3.6.2, Claude, the session picker and its shell found the system's
+  programs before yours.** 3.6.2 gave the terminal session the persistent
+  folders first, but tmux replaces the `PATH` of a new session's first window
+  with the `PATH` of the program that creates the session - and that is the
+  app's start, which uses the system's programs first since 3.6.2. A program
+  you installed with `persist-install` that the image also has (e.g. a newer
+  `git` or `python3`) then lost to the image's copy there. New tmux windows
+  and login shells were fine.
+- The first window now sets its `PATH` itself. The app's own start and
+  services keep the system's programs first.
+- The CI boot test now reads the environment of the process in that window
+  instead of only the session's settings, which is how this got through.
+
 ## 3.6.2
 
 ### ✨ New Feature - Home Assistant status line under Claude's prompt

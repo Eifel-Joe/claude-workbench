@@ -249,6 +249,22 @@ case "$session_path" in
     PATH=/data/packages/bin:*) ;;
     *) fail "the tmux session 'claude' lacks the persistent folders first: $session_path" ;;
 esac
+# The session environment alone proves nothing for the first pane: tmux puts
+# the PATH of the client that ran new-session there (spawn.c), which hid the
+# 3.6.2 bug from the check above. Read what Claude and the session picker run
+# with: the pane's own process.
+pane_pid=$(in_container "tmux display-message -p -t claude '#{pane_pid}'") || \
+    fail "the tmux session 'claude' has no pane"
+pane_path=$(path_of "$pane_pid")
+case "$pane_path" in
+    /data/packages/bin:*) ;;
+    *) fail "the session's first pane (Claude, session picker) runs with PATH '$pane_path'" ;;
+esac
+pane_ld=$(library_path_of "$pane_pid")
+case "$pane_ld" in
+    LD_LIBRARY_PATH=/data/packages/lib*) ;;
+    *) fail "the session's first pane lacks /data/packages/lib: '$pane_ld'" ;;
+esac
 login_path=$(in_container "bash -lc 'printf %s \"\$PATH\"'")
 case "$login_path" in
     /data/packages/bin:*) ;;
