@@ -9,7 +9,10 @@
   vorhanden) und die Gruppe `settings.json` + beide Plugin-Listen (+ unsere Plugin-Merkdatei) unsere als
   ganze Dateien; erst kopieren (`*.takeover`), dann tauschen; unsere nach
   `/data/migration/replaced/<datum>/`. `paths.js` `replaced`.
-- Lokal grün: `node --test tests/test-app-migration.js` (75/75), `test-release-metadata.sh`,
+- Opus-Review: kein Critical/Important; Minor 1 (zweite Übernahme am selben Tag überschreibt
+  `replaced/<datum>`) als Important behoben (`<datum>-2` …), übrige fünf Minor zurückgestellt (Ledger,
+  PR-Text).
+- Lokal grün: `node --test tests/test-app-migration.js` (76/76), `test-release-metadata.sh`,
   `test-migration-undecided.sh`. unbestätigt bis CI: übrige Suiten (jq fehlt lokal), Boot-Test.
 
 ### Fallen
