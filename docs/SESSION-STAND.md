@@ -1,5 +1,28 @@
 # Sitzungsstand
 
+## 2026-11-06 (22) — 3.6.3 erste Pane der Sitzung bekommt die persistenten Ordner vorn (n20)
+
+### Stand
+- Befund aus dem Live-Test 3.6.2 auf HA-Test: Shell aus dem Sitzungsmenü hatte die persistenten
+  Ordner hinten. Ursache, Fix und Tests: Spec `docs/specs/2026-11-06-round-3.6.2-design.md`,
+  Abschnitt „Nachtrag 3.6.3“. Branch `fix/round-3.6.3` von `main` (v3.6.2).
+- Ursache belegt im tmux-3.7c-Quelltext (`spawn.c`): `PATH` der ersten Pane kommt vom
+  nicht angehängten Client, nicht aus `-e`.
+- Lokal grün: test-command-path (Fall 6 RED → GREEN), -library-path, -tmux-config, -startup-order,
+  -release-metadata; shellcheck wie CI.
+- unbestätigt bis CI: Boot-Test mit `/proc/<pane_pid>/environ`.
+
+### Fallen
+- `tmux show-environment` zeigt die Sitzungsumgebung, nicht was ein Pane-Prozess bekommt. Umgebung
+  immer am Prozess (`/proc/<pid>/environ`) prüfen.
+
+### Nächste Schritte
+- PR-Text freigeben, PR, CI grün; dann Hauptsitzung: Merge, Release (`docs/release-notes-3.6.3.md`),
+  HA-Update; Prüfung: Sitzungsmenü → 8, `echo $PATH` beginnt mit `/data/packages/bin`.
+
+### Empfohlene Skills
+- `task-loop`, `release-weg`.
+
 ## 2026-11-06 (21) — 3.6.2 Statuszeile, HA-Plugin, System-PATH, null-Optionen (p18, p19, n20, n21)
 
 ### Stand
