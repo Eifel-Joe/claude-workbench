@@ -15,6 +15,9 @@ function migrationPaths(env = process.env) {
     // (cli.js runDetect, n33); run.sh's APP_MIGRATION_UNDECIDED.
     undecided: path.join(dir, 'undecided'),
     state: path.join(dir, 'state'),
+    // This app's own Claude setup files the takeover replaced (apply.js
+    // setAsideOwnSetup, n40), one folder per takeover date.
+    replaced: path.join(dir, 'replaced'),
     work: path.join(dir, 'work'),
   };
 }
