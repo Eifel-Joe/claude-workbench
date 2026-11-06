@@ -160,6 +160,8 @@ printf '{}\n' > "$APP_MIGRATION_OFFER"
 
 # Detection output: "WARNING:" lines become log warnings (prefix stripped).
 APP_MIGRATION_CLI="$tmp_dir/cli.js"
+# The marker detect_app_migration creates first (n33); /data does not exist here.
+APP_MIGRATION_UNDECIDED="$tmp_dir/migration/undecided"
 : > "$APP_MIGRATION_CLI"
 node() { printf '%s\n' 'App migration: nothing to offer (state)' 'WARNING: App migration: detection failed, skipping (x)'; }
 bashio::log.info() { printf 'info|%s\n' "$*" >> "$tmp_dir/migration.log"; }

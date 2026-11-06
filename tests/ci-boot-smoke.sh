@@ -185,17 +185,18 @@ in_container '[ -f /data/packages/stale-alpine-3.21/lib/libstdc++.so.6 ]' || \
     fail "the stale libstdc++ copy was not moved out of LD_LIBRARY_PATH"
 [ "$(in_container 'cat /data/packages/.alpine-release')" = "3.24" ] || \
     fail "the Alpine release was not recorded"
-# Options unreadable: plugin and status line leave ~/.claude alone (R2).
-grep -q 'Home Assistant plugin: the app options could not be read' <<< "$log" || \
-    fail "the plugin step did not skip on unreadable options"
-grep -q 'Status line: the app options could not be read' <<< "$log" || \
-    fail "the status line step did not skip on unreadable options"
-in_container "[ ! -f /data/home/.claude/settings.json ] || ! jq -e 'has(\"statusLine\")' /data/home/.claude/settings.json" || \
-    fail "a status line was written although the options could not be read"
-# The takeover check could not ask the Supervisor either: it stays undecided,
-# so a takeover offered later still finds ~/.claude untouched (n33).
+# The silent Supervisor leaves the takeover check undecided, so plugin and
+# status line skip before they read their options (n33; R2, unreadable
+# options, is covered by tests/test-ha-plugin.sh and tests/test-statusline.sh)
+# and leave ~/.claude alone; a takeover offered later still finds it untouched.
 in_container "[ -e /data/migration/undecided ]" || \
     fail "a failed takeover check did not leave /data/migration/undecided"
+grep -q 'Home Assistant plugin: a data takeover offer is open or could not be checked' <<< "$log" || \
+    fail "the plugin step did not skip while the takeover check was undecided"
+grep -q 'Status line: a data takeover offer is open or could not be checked' <<< "$log" || \
+    fail "the status line step did not skip while the takeover check was undecided"
+in_container "[ ! -f /data/home/.claude/settings.json ] || ! jq -e 'has(\"statusLine\")' /data/home/.claude/settings.json" || \
+    fail "a status line was written although the Supervisor did not answer"
 
 # --- 5. Second start: a broken library copy, no release change (n10) ----------
 
