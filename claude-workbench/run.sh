@@ -94,6 +94,18 @@ run_with_timeout() {
 # `bash -c` it kills only bash: the orphaned curl keeps the $(...) pipe open
 # and the read still hangs), a watchdog subshell (same orphan), a curlrc
 # (applies to every curl of the environment). tests/test-option-timeout.sh.
+#
+# "null" (n21). Root cause: bashio 0.19.0 sets `default_value=${2:-null}`
+# (lib/config.sh), so an option missing from the configuration, or set to JSON
+# null, came back from `read_option x ''` as the word "null", not empty.
+# Affected were all reads with an empty default: Claude started with
+# `--remote-control null`, the package lists ran `persist-install null`.
+# Fix: "null" counts as empty here, for every option at once, instead of a
+# check in each caller (as upstream does). Accepted: an option whose value is
+# literally "null" reads as unset. Rejected: bashio::config.exists first (a
+# second Supervisor request, and the time limit above would apply twice).
+# The Supervisor normally fills in config.yaml's defaults, so this is a guard.
+# tests/test-option-null.sh.
 read_option() {
     local value=''
     local started=$SECONDS
@@ -106,6 +118,9 @@ read_option() {
             { : > "$OPTION_READ_GAVE_UP"; } 2>/dev/null || true
             bashio::log.warning "The Supervisor did not answer within ${OPTION_READ_TIMEOUT}s; the app options use their defaults for this start"
         fi
+    fi
+    if [ "$value" = null ]; then
+        value=''
     fi
     printf '%s\n' "${value:-$2}"
 }
