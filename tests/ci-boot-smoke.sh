@@ -7,7 +7,12 @@
 # install coming from Alpine 3.21: a Python 3.12 venv with one package, and a
 # broken copy of libstdc++ that persist-install might have left in
 # /data/packages/lib. A second start then finds a broken copy again WITHOUT a
-# release change (n10): the app's services must not load it.
+# release change (n10): the app's services must not load it, and same-named
+# copies of node and curl in /data/packages/bin must not be run by startup or
+# the services (n20). A third start runs against a Supervisor that answers
+# (tests/ci-fake-supervisor.js): the real bashio meets missing options (n21),
+# the Home Assistant plugin gets installed (p19) and the status line reads Home
+# Assistant through http://supervisor with the token (p18).
 #
 # Approach from heytcass (d50e6c0d, heytcass/home-assistant-addons#139: boot
 # without a Supervisor) and unsnow-iac (4eaad373: run `claude --version` to
@@ -17,6 +22,7 @@
 set -euo pipefail
 
 image="${1:?usage: ci-boot-smoke.sh IMAGE}"
+tests_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 name=wb-boot
 silent=wb-supervisor
 network=wb-net
@@ -71,7 +77,17 @@ fi
 case "$claude_out" in
     *"symbol not found"*|*"Error relocating"*) fail "musl loader error: $claude_out" ;;
 esac
-echo "Image: Alpine $release, Python $python, Node $node_major, $tmux_version, musl $musl, claude $claude_out"
+plugin_dir=/opt/claude-plugins/claude-homeassistant-plugins
+plugin_version=$(in_image "jq -r .version $plugin_dir/homeassistant-config/.claude-plugin/plugin.json")
+[ "$plugin_version" = "2.1.4" ] || fail "the bundled Home Assistant plugin is '$plugin_version', expected 2.1.4"
+in_image "[ -f $plugin_dir/LICENSE ]" || fail "the Home Assistant plugin's LICENSE is missing from the image"
+preview=$(in_image 'HA_STATUSLINE_CACHE_DIR=/tmp/sl /opt/scripts/ha-statusline.sh --preview') || \
+    fail "ha-statusline --preview failed"
+case "$preview" in
+    *"Opus 5.5"*) ;;
+    *) fail "ha-statusline --preview shows no model: $preview" ;;
+esac
+echo "Image: Alpine $release, Python $python, Node $node_major, $tmux_version, musl $musl, claude $claude_out, HA plugin $plugin_version"
 
 # --- 2. /data as Alpine 3.21 left it -----------------------------------------
 
@@ -96,22 +112,26 @@ docker run -d --name "$silent" --network "$network" --network-alias supervisor \
     -e "require('net').createServer(() => {}).listen(80)" >/dev/null
 # Wait until it listens: a read that finds the port closed fails at once and
 # would never reach the time limit.
-listening=false
-for _ in $(seq 1 30); do
-    if docker exec "$silent" node -e \
-            "require('net').connect(80, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))" \
-            >/dev/null 2>&1; then
-        listening=true
-        break
-    fi
-    sleep 1
-done
-[ "$listening" = true ] || fail "the stand-in Supervisor does not listen on port 80"
+wait_listening() {
+    local listening=false
+    for _ in $(seq 1 30); do
+        if docker exec "$silent" node -e \
+                "require('net').connect(80, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))" \
+                >/dev/null 2>&1; then
+            listening=true
+            break
+        fi
+        sleep 1
+    done
+    [ "$listening" = true ] || fail "the stand-in Supervisor does not listen on port 80"
+}
+wait_listening
 
-# Starts the app container and waits for the panel and ttyd.
+# Starts the app container and waits for the panel and ttyd. Extra arguments go
+# to docker run (e.g. -e SUPERVISOR_TOKEN=...).
 boot() {
     local up=false
-    docker run -d --name "$name" --network "$network" \
+    docker run -d --name "$name" --network "$network" "$@" \
         -v "$data:/data" -v "$config:/config" "$image" >/dev/null
     for _ in $(seq 1 90); do
         if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != "true" ]; then
@@ -157,6 +177,13 @@ in_container '[ -f /data/packages/stale-alpine-3.21/lib/libstdc++.so.6 ]' || \
     fail "the stale libstdc++ copy was not moved out of LD_LIBRARY_PATH"
 [ "$(in_container 'cat /data/packages/.alpine-release')" = "3.24" ] || \
     fail "the Alpine release was not recorded"
+# Options unreadable: plugin and status line leave ~/.claude alone (R2).
+grep -q 'Home Assistant plugin: the app options could not be read' <<< "$log" || \
+    fail "the plugin step did not skip on unreadable options"
+grep -q 'Status line: the app options could not be read' <<< "$log" || \
+    fail "the status line step did not skip on unreadable options"
+in_container "[ ! -f /data/home/.claude/settings.json ] || ! jq -e 'has(\"statusLine\")' /data/home/.claude/settings.json" || \
+    fail "a status line was written although the options could not be read"
 
 # --- 5. Second start: a broken library copy, no release change (n10) ----------
 
@@ -164,6 +191,17 @@ in_container '[ -f /data/packages/stale-alpine-3.21/lib/libstdc++.so.6 ]' || \
 # The app's own services must not load it; the terminal session still gets the
 # folder.
 in_container "printf 'not a library\\n' > /data/packages/lib/libstdc++.so.6"
+# Same-named copies of node and curl where persist-install puts programs (n20).
+# They log the PATH they were started with and fail. Startup and the services
+# run with the system first, so no line may come from them; the terminal
+# session (persistent folders first) may run them.
+for planted in node curl; do
+    docker exec -i "$name" sh -c "cat > /data/packages/bin/$planted && chmod 755 /data/packages/bin/$planted" << EOF
+#!/bin/sh
+printf '%s\n' "\$PATH" >> /data/planted-$planted.log
+exit 97
+EOF
+done
 docker rm -f "$name" >/dev/null
 boot
 
@@ -194,5 +232,89 @@ case "$login_env" in
     /data/packages/lib*) ;;
     *) fail "a login shell lacks /data/packages/lib: '$login_env'" ;;
 esac
+
+# n20: the services run with the system's programs first, the session and
+# login shells with the persistent ones first.
+path_of() {
+    in_container "tr '\\000' '\\n' < /proc/$1/environ | sed -n 's/^PATH=//p'"
+}
+for service in "node:$node_pid" "ttyd:$ttyd_pid" "tmux server:$tmux_pid"; do
+    service_path=$(path_of "${service#*:}")
+    case "$service_path" in
+        /data/packages*|'') fail "${service%%:*} runs with PATH '$service_path' (persistent folders first or none)" ;;
+    esac
+done
+session_path=$(in_container 'tmux show-environment -t claude PATH') || fail "the tmux session 'claude' has no PATH"
+case "$session_path" in
+    PATH=/data/packages/bin:*) ;;
+    *) fail "the tmux session 'claude' lacks the persistent folders first: $session_path" ;;
+esac
+login_path=$(in_container "bash -lc 'printf %s \"\$PATH\"'")
+case "$login_path" in
+    /data/packages/bin:*) ;;
+    *) fail "a login shell lacks the persistent folders first: '$login_path'" ;;
+esac
+for planted in node curl; do
+    from_services=$(in_container "[ ! -f /data/planted-$planted.log ] || grep -v '^/data/packages/bin' /data/planted-$planted.log || true")
+    [ -z "$from_services" ] || fail "startup or a service ran the planted $planted (PATH: $from_services)"
+done
+in_container 'rm -f /data/packages/bin/node /data/packages/bin/curl /data/planted-node.log /data/planted-curl.log'
+
+# --- 6. Third start: a Supervisor that answers (n21, p19, p18) ----------------
+
+# The real bashio meets options that are missing (remote_control_session_name,
+# the package lists): no "null" may come of them.
+docker rm -f "$name" "$silent" >/dev/null
+docker run -d --name "$silent" --network "$network" --network-alias supervisor \
+    -e FAKE_OPTIONS='{"auto_launch_claude":true,"remote_control":true,"home_assistant_plugin":true,"statusline":[]}' \
+    -v "$tests_dir/ci-fake-supervisor.js:/fake-supervisor.js:ro" \
+    --entrypoint node "$image" /fake-supervisor.js >/dev/null
+wait_listening
+boot -e SUPERVISOR_TOKEN=ci-token
+log=$(docker logs "$name" 2>&1)
+
+if grep -q 'The Supervisor did not answer' <<< "$log"; then
+    fail "the answering Supervisor ran into the time limit"
+fi
+grep -q 'Remote Control enabled' <<< "$log" || fail "remote_control from the options did not arrive"
+if grep -q 'Installing: null' <<< "$log"; then
+    fail "a missing package list was installed as a package named null"
+fi
+launch_cmd=$(in_container 'tmux show-environment -g CLAUDE_LAUNCH_CMD') || \
+    fail "the tmux server has no CLAUDE_LAUNCH_CMD"
+case "$launch_cmd" in
+    *"--remote-control null"*) fail "Claude starts with the session name null: $launch_cmd" ;;
+    *"--remote-control"*) ;;
+    *) fail "Claude starts without --remote-control: $launch_cmd" ;;
+esac
+
+# p19: installed from the bundled copy, enabled, remembered.
+grep -q 'Home Assistant plugin: installed 2.1.4' <<< "$log" || fail "the Home Assistant plugin was not installed"
+plugins=$(docker exec -e HOME=/data/home "$name" claude plugin list --json) || fail "claude plugin list failed"
+jq -e '[.[] | select(.id == "homeassistant-config@claude-homeassistant-plugins" and .version == "2.1.4" and .enabled == true)] | length == 1' \
+    <<< "$plugins" > /dev/null || fail "the Home Assistant plugin is not installed and enabled: $plugins"
+
+# p18: our status line in settings.json, Home Assistant read with the token.
+in_container "jq -e '.statusLine.command == \"/usr/local/bin/ha-statusline\" and .statusLine.refreshInterval == 30' /data/home/.claude/settings.json" \
+    > /dev/null || fail "settings.json has no Home Assistant status line"
+grep -q 'Home Assistant status line enabled' <<< "$log" || fail "enabling the status line was not logged"
+in_container 'HOME=/data/home ha-statusline --refresh' || fail "ha-statusline --refresh failed against the Supervisor"
+home_line=$(in_container 'HOME=/data/home ha-statusline --home')
+case "$home_line" in
+    *"Kitchen smoke"*) ;;
+    *) fail "the home line does not show the smoke alert: $home_line" ;;
+esac
+requests=$(docker exec "$silent" cat /tmp/requests.log)
+grep -q '^GET /core/api/states token$' <<< "$requests" || \
+    fail "the status line did not ask Home Assistant with the token: $requests"
+if grep -q ' no-token$' <<< "$requests"; then
+    fail "a request reached the Supervisor without the token: $requests"
+fi
+
+# A restart with nothing changed leaves the plugin alone.
+docker rm -f "$name" >/dev/null
+boot -e SUPERVISOR_TOKEN=ci-token
+grep -q 'Home Assistant plugin: 2.1.4, home_assistant_plugin=true, nothing to do' <<< "$(docker logs "$name" 2>&1)" || \
+    fail "a restart without changes touched the Home Assistant plugin again"
 
 echo "Boot smoke test passed"
