@@ -1,5 +1,72 @@
 # Changelog
 
+## 3.6.2
+
+### ✨ New Feature - Home Assistant status line under Claude's prompt
+- **Two short lines under Claude's input.** The first shows the model, the
+  context left, the folder (git branch, `*` with changes) and your plan limits
+  (the cost with an API key). The second shows what in your home needs a look:
+  smoke, gas, CO, water and safety alerts, Supervisor repairs, broken
+  automations, a backup older than two days, a disk over 80 %, a new Home
+  Assistant version, pending updates and batteries under 20 %. Each piece only
+  shows when it has something to say; a healthy home is just `🏠 ✓`.
+- **Never waits for Home Assistant.** States are read in the background at most
+  every 30 seconds, the Supervisor's backups, disk and repairs every 5 minutes;
+  Claude redraws the line every 30 seconds.
+- **New option `statusline`** (on by default): your own pieces in display order,
+  entities as `sensor.x` or `CO2=sensor.x`, `---` for a new line, `-sensor.car_*`
+  to leave entities out, `off` to remove it. A status line you set yourself with
+  `/statusline` is never replaced; add the home to it with `ha-statusline --home`.
+- **The Supervisor token stays with the Supervisor:** it only goes to
+  `http://supervisor`, on curl's stdin, and the app calls the image's curl by
+  its full path, so a `curl` in `/data/packages/bin` never gets it.
+- Thanks to **ESJavadex** for the status line (ESJavadex/claude-code-ha
+  `ae4f88ec`, `dde63c98`, `7b558af0`, `6422e800`), to **susomejias** for the
+  style it is based on (susomejias/claude-statusline, MIT) and to **Neil
+  Sleightholm (nsleigh)** for the context icon spacing (`823f14da`). The full
+  curl path, the start-safe setup and the takeover/option guards are our own.
+
+### ✨ New Feature - The Home Assistant plugin for Claude comes with the app
+- **`homeassistant-config` 2.1.4 by ESJavadex is installed on the first
+  start**, from a copy in the image, without the network. Claude then writes
+  current Home Assistant syntax, checks every YAML file it edits ("Checking
+  Home Assistant YAML") and gets `/ha-check`, `/ha-upgrade` and
+  `/ha-find-duplicates`.
+- **New option `home_assistant_plugin`** (on by default): off disables the
+  plugin, on enables it again. If you turn it off with `/plugin`, an app update
+  with a newer plugin keeps it off.
+- Thanks to **ESJavadex** for the plugin
+  ([claude-homeassistant-plugins](https://github.com/ESJavadex/claude-homeassistant-plugins),
+  MIT) and for bundling it (ESJavadex/claude-code-ha `42c53d48`). Our own:
+  the plugin is pinned to its release commit, a failed install or update is
+  tried again on the next start, and nothing is changed while the options
+  cannot be read.
+- Status line and plugin leave `~/.claude` alone while the app offers to take
+  over data from an older app, so your old `settings.json` comes across; they
+  are set up on the next start.
+
+### 🛠️ Improvement - The app's start uses the system's programs first
+- **A copy of `node` or `curl` in `/data/packages/bin` can no longer break the
+  panel or the option reads.** The start and the app's services (the panel's
+  Node.js service, ttyd, tmux) now find the system's programs first and your
+  persistent ones after them. In the terminal - Claude, the session picker, new
+  windows - your persistent programs still come first.
+- Thanks to **unsnow-iac** for the idea (commits `08686e1e`, `83c6997e`, found
+  in miczu71's fork, branch `history/unsnow-full`); here ttyd and tmux keep the
+  system order too.
+
+### 🐛 Bug Fix - A missing option no longer reads as "null"
+- bashio turns an empty default into the word `null`, so an option missing
+  from the configuration would have started Claude as Remote Control session
+  "null" and installed a package called `null`. Such an option now counts as
+  empty. The Supervisor normally fills in the defaults, so this guards a rare
+  case.
+
+### 🔧 Technical
+- The CI boot test also checks the bundled plugin and the status line, plants
+  `node` and `curl` in `/data/packages/bin`, and starts a third time against a
+  Supervisor that answers.
+
 ## 3.6.1
 
 ### 🐛 Bug Fix - A Supervisor that does not answer no longer stalls the start

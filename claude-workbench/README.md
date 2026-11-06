@@ -30,6 +30,8 @@ This app provides a web-based terminal interface with Claude Code CLI pre-instal
 - **Shift+Enter**: Inserts a new line in Claude's input instead of sending it
 - **Key Bar on Phones**: Esc, arrow keys, Enter, Shift+Tab and a guarded Ctrl+C above the on-screen keyboard
 - **Auto-Continue (opt-in)**: After a usage limit, types `continue` once the limit has reset; off by default, switchable from the panel header
+- **Home Assistant Status Line**: Model, context, folder and plan limits under Claude's input, plus what in your home needs a look (alerts, repairs, backups, disk, updates, batteries), refreshed every 30 s
+- **Home Assistant Plugin for Claude**: `homeassistant-config` by ESJavadex, installed on the first start: current HA syntax, a YAML check after every edit, `/ha-check`, `/ha-upgrade`, `/ha-find-duplicates`
 - **Multi-Architecture Support**: Works on amd64 and aarch64
 - **Secure Credential Management**: Persistent authentication with safe credential storage
 - **Automatic Recovery**: Built-in fallbacks and error handling for reliable operation

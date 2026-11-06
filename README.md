@@ -1,6 +1,6 @@
 # Claude Workbench for Home Assistant
 
-[![Version](https://img.shields.io/badge/version-3.6.1-1f6feb)](claude-workbench/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.6.2-1f6feb)](claude-workbench/CHANGELOG.md)
 [![Latest release](https://img.shields.io/github/v/release/Eifel-Joe/claude-workbench?label=release&color=1f6feb)](https://github.com/Eifel-Joe/claude-workbench/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-3fb950)](LICENSE)
 [![Architectures](https://img.shields.io/badge/arch-amd64%20%7C%20aarch64-8957e5)](#architecture-support)
@@ -65,6 +65,8 @@ Authentication uses OAuth — no API key or config needed for a normal setup. Th
 - **GitHub CLI** (`gh`) — with persistent auth
 - **git, Python 3 + pip, Node.js, jq, yq, vim, nano, tree** and more, out of the box
 - **Claude Code skills & commands** for Home Assistant pre-installed
+- **Home Assistant plugin for Claude** — `homeassistant-config` by ESJavadex, installed on the first start: current HA syntax, a YAML check after every edit, `/ha-check`, `/ha-upgrade`, `/ha-find-duplicates` (`home_assistant_plugin`)
+- **Home Assistant status line** — under Claude's input: model, context, folder and plan limits, then what in your home needs a look (alerts, repairs, backups, disk, updates, batteries), refreshed every 30 s (`statusline`)
 
 ### Persistence & packages
 - **Everything in `/data`** survives reboots and app updates (auth, config, packages)
@@ -91,6 +93,8 @@ Authentication uses OAuth — no API key or config needed for a normal setup. Th
 | `persistent_pip_packages` | `[]` | Python (pip) packages to auto-install on startup |
 | `use_persistent_claude` | `true` | Use a Claude Code install kept in `/data/npm` instead of the baked-in one |
 | `auto_update_claude_on_start` | `true` | When the override is enabled, update it on each start |
+| `home_assistant_plugin` | `true` | Install and enable the bundled Home Assistant plugin for Claude |
+| `statusline` | `[]` | Pieces of the status line under Claude's input; empty = default layout, `off` removes it |
 
 **Example:**
 
@@ -140,15 +144,13 @@ gh repo list
 
 ---
 
-## Recommended: Home Assistant plugins for Claude
+## Home Assistant plugin for Claude
 
-Pair the app with the **[Claude Home Assistant Plugins](https://github.com/ESJavadex/claude-homeassistant-plugins)** for HA-specific tools and context (entity management, automation helpers, and more):
-
-```bash
-npx claude-plugins install @ESJavadex/claude-homeassistant-plugins/homeassistant-config
-```
-
-This drops a `CLAUDE.md` into your config directory with context tailored for Home Assistant development.
+Since 3.6.2 the app ships **`homeassistant-config`** from ESJavadex's
+**[Claude Home Assistant Plugins](https://github.com/ESJavadex/claude-homeassistant-plugins)** (MIT)
+and installs it on the first start, without the network. Claude then writes current Home Assistant
+syntax, checks every YAML file it edits and gets `/ha-check`, `/ha-upgrade` and `/ha-find-duplicates`.
+Turn it off with the `home_assistant_plugin` option or with `/plugin` in Claude.
 
 ---
 
@@ -179,8 +181,10 @@ Claude Workbench is maintained by [@Eifel-Joe](https://github.com/Eifel-Joe). It
   ([heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons))
 - **Community fork contributions:** [@Moulbi](https://github.com/Moulbi),
   [@PeterLinuxOSS](https://github.com/PeterLinuxOSS), [@nsleigh](https://github.com/nsleigh),
-  [@marcjay](https://github.com/marcjay), [@martinboksa](https://github.com/martinboksa) —
+  [@marcjay](https://github.com/marcjay), [@martinboksa](https://github.com/martinboksa),
+  [@unsnow-iac](https://github.com/unsnow-iac) —
   each change is credited in the [changelog](claude-workbench/CHANGELOG.md)
+- **Status line style:** [susomejias/claude-statusline](https://github.com/susomejias/claude-statusline) (MIT)
 
 Built and maintained with the help of Claude Code itself.
 
