@@ -16,13 +16,26 @@ async function runDetect() {
   const p = migrationPaths();
   try {
     const r = await detect(createClient({ timeoutMs: DETECT_TIMEOUT_MS }), p);
+    // Decided (n33): from here an offer file alone says whether a takeover can
+    // still come, so the status line and the plugin may write to ~/.claude.
+    // Its own try: a failure here must not reach the catch below, which
+    // deletes the offer just written.
+    try {
+      fs.rmSync(p.undecided, { force: true });
+    } catch (e) {
+      console.log(`WARNING: App migration: could not remove ${p.undecided} (${e.message})`);
+    }
     console.log(r.offered
       ? `App migration: offering data from ${r.offer.name} ${r.offer.version} (${r.offer.slug})`
       : `App migration: nothing to offer (${r.reason})`);
   } catch (e) {
     // An offer from an earlier start may point at an app that is gone now.
     fs.rmSync(p.offer, { force: true });
-    console.log(`WARNING: App migration: detection failed, skipping (${e.message})`);
+    // p.undecided stays (run.sh created it): an old app may still be there,
+    // and files the status line or the plugin wrote now would keep its files
+    // out of a takeover offered on a later start (n33).
+    console.log(`WARNING: App migration: detection failed, skipping (${e.message}); `
+      + 'status line and Home Assistant plugin wait for the next start');
   }
 }
 

@@ -16,10 +16,10 @@ configuration:
     description: "Claude runs commands and edits files without asking first. Only use this if you trust every step."
   persistent_apk_packages:
     name: "Persistent system packages"
-    description: "Alpine packages (apk) installed on every start and kept across restarts, e.g. git or vim."
+    description: "Alpine packages (apk) installed on every start and kept across restarts, e.g. git or vim. One package per entry; entries starting with - are skipped."
   persistent_pip_packages:
     name: "Persistent Python packages"
-    description: "Python packages (pip) installed on every start into the persistent Python environment."
+    description: "Python packages (pip) installed on every start into the persistent Python environment. One package per entry (requests==2.31.0 works); entries starting with - are skipped."
   use_persistent_claude:
     name: "Keep Claude Code current in /data"
     description: "Installs Claude Code in persistent storage so new versions and models arrive without a new app image."

@@ -24,6 +24,7 @@ fail() {
 }
 
 strip_ansi() { sed 's/\x1b\[[0-9;]*m//g'; }
+file_age_s() { echo $(( $(date +%s) - $(stat -c %Y "$1") )); }
 # A file:// URL curl can read: Windows builds of curl need the drive letter.
 file_url() {
     if command -v cygpath > /dev/null 2>&1; then
@@ -170,6 +171,58 @@ sleep 0.5
 [ ! -e "$HA_STATUSLINE_CACHE_DIR/states.json" ] || fail "a Claude-only layout should not refresh"
 rm -f "$HA_STATUSLINE_CONFIG"
 
+# --- n32: --refresh by hand waits for a refresh already running ---------------
+lock="$HA_STATUSLINE_CACHE_DIR/refresh.lock"
+states="$HA_STATUSLINE_CACHE_DIR/states.json"
+mkdir -p "$HA_STATUSLINE_CACHE_DIR"
+
+# The running refresh ends after 1 s: --refresh waits, then refreshes itself.
+rm -f "$states"
+mkdir "$lock"
+( sleep 1; rmdir "$lock" ) &
+started=$SECONDS
+"$script" --refresh || fail "--refresh after a running refresh ended should succeed"
+wait
+[ -s "$states" ] || fail "--refresh returned without refreshing while another refresh ran"
+[ $((SECONDS - started)) -lt 10 ] || fail "--refresh waited far longer than the running refresh"
+
+# The running refresh does not end in time: an error, not a silent success.
+mkdir "$lock"
+started=$SECONDS
+if err=$(HA_STATUSLINE_REFRESH_WAIT=1 "$script" --refresh 2>&1); then
+    fail "--refresh reported success although another refresh kept running"
+fi
+[[ "$err" == *"another refresh is still running"* ]] || fail "--refresh gave no reason: $err"
+[ $((SECONDS - started)) -lt 8 ] || fail "--refresh waited past HA_STATUSLINE_REFRESH_WAIT"
+
+# The background refresh still gives up at once.
+rm -f "$states"
+started=$SECONDS
+"$script" --refresh-background || fail "--refresh-background must not fail on a busy lock"
+[ $((SECONDS - started)) -lt 3 ] || fail "--refresh-background waited for the lock"
+[ ! -e "$states" ] || fail "--refresh-background refreshed although another refresh ran"
+rmdir "$lock"
+
+# A lock left by a killed refresh turns stale (60 s) while --refresh waits:
+# it takes the lock over then instead of giving up (review).
+mkdir "$lock"
+touch -d '58 seconds ago' "$lock"
+started=$SECONDS
+HA_STATUSLINE_REFRESH_WAIT=15 "$script" --refresh || fail "--refresh gave up on a lock that turned stale while it waited"
+[ -s "$states" ] || fail "--refresh did not refresh after taking over a stale lock"
+[ $((SECONDS - started)) -lt 12 ] || fail "--refresh waited for the whole limit although the lock went stale"
+
+# The status line starts the background form: with a busy lock that is freed
+# right away, nothing may wait and refresh after it (default layout = home).
+printf '[]\n' > "$states"
+touch -d '10 minutes ago' "$states"
+mkdir "$lock"
+"$script" < /dev/null > /dev/null
+( sleep 0.5; rmdir "$lock" ) &
+sleep 2
+wait
+[ "$(file_age_s "$states")" -ge 300 ] || fail "the status line's refresh waited for the lock and refreshed"
+
 # --- The Supervisor token ---------------------------------------------------
 
 # A curl stand-in that records its arguments and what it got on stdin.
@@ -260,6 +313,7 @@ cd "$tmp_dir"
 export HA_STATUSLINE_BIN="bin/ha-statusline"
 export HA_STATUSLINE_SOURCE="$script"
 export APP_MIGRATION_OFFER="$tmp_dir/offer.json"
+export APP_MIGRATION_UNDECIDED="$tmp_dir/undecided"
 settings="$HOME/.claude/settings.json"
 mkdir -p "$tmp_dir/bin"
 
@@ -360,6 +414,14 @@ setup_statusline || fail "an open takeover offer must not fail the start"
 [ ! -e "$settings" ] || fail "an open takeover offer must leave ~/.claude alone"
 [ -x "$HA_STATUSLINE_BIN" ] || fail "the script must be installed while a takeover offer is open"
 rm -f "$APP_MIGRATION_OFFER"
+
+# The takeover check has not decided yet (n33): same as an open offer
+rm -rf "$HOME/.claude"
+: > "$APP_MIGRATION_UNDECIDED"
+setup_statusline || fail "an undecided takeover check must not fail the start"
+[ ! -e "$settings" ] || fail "an undecided takeover check must leave ~/.claude alone"
+[ -x "$HA_STATUSLINE_BIN" ] || fail "the script must be installed while the takeover check is undecided"
+rm -f "$APP_MIGRATION_UNDECIDED"
 
 # Nothing can be written (e.g. /data full): warnings, never the end of the start
 : > "$HOME/.claude"

@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, execFile } = require('node:child_process');
 const { buildBackupFixture, startFakeSupervisor, SELF_SLUG, OLD_SLUG } = require('./fake-supervisor');
 
 const MOD = path.join(__dirname, '..', 'claude-workbench', 'scripts', 'app-migration');
@@ -120,6 +120,62 @@ test('detect: offers the old app with its packages and settings', async () => {
   });
 });
 
+// n31: ESJavadex's app has statusline and home_assistant_plugin under our
+// names; its Remote Control switch is enable_remote_control, and it names the
+// session "Home Assistant".
+const ESJ_OPTIONS = {
+  auto_launch_claude: true, tmux_mouse: false, dangerously_skip_permissions: false,
+  enable_remote_control: true, statusline: ['alerts', '---', 'CO2=sensor.co2'], home_assistant_plugin: false,
+  persistent_apk_packages: [], persistent_pip_packages: [],
+};
+
+test('detect: carries the status line, the plugin switch and Remote Control over from ESJavadex\'s app', async () => {
+  await withSupervisor({ oldOptions: ESJ_OPTIONS }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.deepEqual(offer.settings, {
+      auto_launch_claude: true, dangerously_skip_permissions: false, tmux_mouse: false,
+      statusline: ['alerts', '---', 'CO2=sensor.co2'], home_assistant_plugin: false,
+      remote_control: true, remote_control_session_name: 'Home Assistant',
+    });
+  });
+});
+
+test('detect: enable_remote_control off becomes remote_control off, without a name', async () => {
+  await withSupervisor({ oldOptions: { ...ESJ_OPTIONS, enable_remote_control: false } }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.equal(offer.settings.remote_control, false);
+    assert.equal('remote_control_session_name' in offer.settings, false);
+    assert.equal('enable_remote_control' in offer.settings, false);
+  });
+});
+
+test('detect: a null option of the old app is left out, not carried over', async () => {
+  await withSupervisor({ oldOptions: { ...ESJ_OPTIONS, statusline: null } }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.equal('statusline' in offer.settings, false);
+  });
+});
+
+test('detect: an old app with remote_control keeps it, enable_remote_control is ignored', async () => {
+  const oldOptions = { ...ESJ_OPTIONS, remote_control: false, remote_control_session_name: 'Pi', enable_remote_control: true };
+  await withSupervisor({ oldOptions }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.equal(offer.settings.remote_control, false);
+    assert.equal(offer.settings.remote_control_session_name, 'Pi');
+    assert.equal('enable_remote_control' in offer.settings, false);
+  });
+});
+
+test('apply: the carried-over status line and plugin switch land in this app\'s options', async () => {
+  const { result, sup } = await detectThenApply({ oldOptions: ESJ_OPTIONS, ownOptions: { statusline: [], home_assistant_plugin: true } }, ['settings']);
+  assert.equal(result.results.settings, 'ok');
+  assert.deepEqual(sup.state.ownOptions.statusline, ['alerts', '---', 'CO2=sensor.co2']);
+  assert.equal(sup.state.ownOptions.home_assistant_plugin, false);
+  assert.equal(sup.state.ownOptions.remote_control, true);
+  assert.equal(sup.state.ownOptions.remote_control_session_name, 'Home Assistant');
+  assert.equal('enable_remote_control' in sup.state.ownOptions, false);
+});
+
 test('detect: no offer without another Claude Terminal Pro app', async () => {
   const apps = [{ slug: SELF_SLUG, state: 'started' }, { slug: 'core_samba', state: 'started' }];
   await withSupervisor({ apps }, async (client, p) => {
@@ -204,6 +260,46 @@ test('detect: never offers another Claude Workbench as the source', async () => 
   ];
   await withSupervisor({ apps }, async (client, p) => {
     assert.equal((await detect(client, p)).offer.slug, OLD_SLUG);
+  });
+});
+
+// n33: run.sh creates <dir>/undecided before `cli.js detect`; detect removes it
+// once it has decided (offer or nothing to offer). While it lies there, the
+// status line and the plugin leave ~/.claude alone, so a takeover offer that
+// only comes on a later start still finds the old files missing here.
+// Async: the fake Supervisor runs in this process and must keep answering.
+function runCliDetect(p, baseUrl) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [path.join(MOD, 'cli.js'), 'detect'], {
+      env: { ...process.env, MIGRATION_DATA_ROOT: p.dataRoot, SUPERVISOR_API: baseUrl, SUPERVISOR_TOKEN: 'test-token' },
+    }, (err, stdout) => resolve(stdout));
+  });
+}
+
+test('paths: the undecided marker sits next to the offer', () => {
+  const p = migrationPaths({ MIGRATION_DATA_ROOT: '/x' });
+  assert.equal(p.undecided, path.join('/x', 'migration', 'undecided'));
+});
+
+test('cli detect: a decision removes the undecided marker, offer or not', async () => {
+  for (const apps of [undefined, [{ slug: SELF_SLUG, state: 'started' }]]) {
+    await withSupervisor({ apps, oldOptions: OLD_OPTIONS }, async (client, p, sup) => {
+      fs.mkdirSync(p.dir, { recursive: true });
+      fs.writeFileSync(p.undecided, '');
+      const out = await runCliDetect(p, sup.url);
+      assert.equal(fs.existsSync(p.undecided), false, out);
+    });
+  }
+});
+
+test('cli detect: a failed detection leaves the undecided marker', async () => {
+  await withSupervisor({}, async (client, p) => {
+    fs.mkdirSync(p.dir, { recursive: true });
+    fs.writeFileSync(p.undecided, '');
+    const out = await runCliDetect(p, 'http://127.0.0.1:1');
+    assert.match(out, /WARNING: App migration: detection failed/);
+    assert.match(out, /status line and Home Assistant plugin wait for the next start/);
+    assert.equal(fs.existsSync(p.undecided), true);
   });
 });
 
@@ -425,7 +521,7 @@ test('apply: reinstalls packages from old options plus the old venv, records the
   const { result, sup } = await detectThenApply({ ownOptions }, ['packages'], fake.deps);
   assert.equal(result.results.packages, 'ok');
   // One pip call for all; idna is only a dependency (no REQUESTED), so pip pulls it in itself.
-  assert.deepEqual(persistCalls(fake), ['htop', '--python httpx requests']);
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx requests']);
   assert.deepEqual(sup.state.ownOptions.persistent_apk_packages, ['git', 'htop']);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'requests']);
   assert.equal(sup.state.ownOptions.auto_launch_claude, true, 'unrelated own options must survive');
@@ -435,7 +531,7 @@ test('apply: without any REQUESTED marker every venv package is taken', async ()
   const fake = fakePersistInstall(tmp());
   const fixture = { omit: [`${SITE_PACKAGES}/requests-2.32.0.dist-info/REQUESTED`] };
   const { sup } = await detectThenApply({ fixture }, ['packages'], fake.deps);
-  assert.deepEqual(persistCalls(fake), ['htop', '--python httpx idna requests']);
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx idna requests']);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'idna', 'requests']);
 });
 
@@ -443,7 +539,7 @@ test('apply: pip names are compared normalised, the old options spelling wins', 
   const fake = fakePersistInstall(tmp());
   const oldOptions = { ...OLD_OPTIONS, persistent_pip_packages: ['httpx', 'Requests'] };
   const { sup } = await detectThenApply({ oldOptions }, ['packages'], fake.deps);
-  assert.deepEqual(persistCalls(fake), ['htop', '--python httpx Requests']);
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx Requests']);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'Requests']);
 });
 
@@ -452,10 +548,42 @@ test('apply: a failing pip batch is retried one by one, only the good ones are r
   const oldOptions = { ...OLD_OPTIONS, persistent_pip_packages: ['httpx', 'badpy'] };
   const { result, sup } = await detectThenApply({ oldOptions }, ['packages'], fake.deps);
   assert.deepEqual(persistCalls(fake), [
-    'htop', '--python httpx badpy requests', '--python httpx', '--python badpy', '--python requests',
+    '--apk htop', '--python httpx badpy requests', '--python httpx', '--python badpy', '--python requests',
   ]);
   assert.match(result.results.packages, /^error: could not install badpy$/);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'requests']);
+});
+
+// n30: a package name reaches persist-install only after --apk/--python and
+// only if it is one name; a leading - would be a flag, a bare `ha` a mode.
+test('detect: only valid package names reach the offer', async () => {
+  const oldOptions = { ...OLD_OPTIONS, persistent_apk_packages: ['htop', '--ha-cli', 'ha', 'git vim'],
+    persistent_pip_packages: ['httpx', '-r x', 'pandas[all]'] };
+  await withSupervisor({ oldOptions }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.deepEqual(offer.apk, ['htop', 'ha']);
+    assert.deepEqual(offer.pip, ['httpx', 'pandas[all]']);
+  });
+});
+
+test('apply: invalid names from the old venv or an older offer are skipped, not failed', async () => {
+  const fake = fakePersistInstall(tmp());
+  const lines = [];
+  const fixture = { extra: { [`${SITE_PACKAGES}/-evil-1.0.dist-info/REQUESTED`]: '' } };
+  const { result, sup } = await withSupervisor({ oldOptions: OLD_OPTIONS, fixture }, async (client, p, s) => {
+    const { offer } = await detect(client, p);
+    offer.apk.push('--ha-cli'); // written by a version without the check
+    const r = await apply(client, p, offer, ['packages', 'stop'],
+      { today: '2026-10-06', pollMs: 1, log: (l) => lines.push(l), ...fake.deps });
+    return { result: r, sup: s };
+  });
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx requests']);
+  assert.equal(result.results.packages, 'ok');
+  assert.equal(result.results.stop, 'ok', 'a skipped name must not keep the old app running');
+  assert.deepEqual(sup.state.ownOptions.persistent_apk_packages, ['htop']);
+  assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'requests']);
+  assert.ok(lines.some((l) => l.includes('skipped --ha-cli (not a package name)')), lines.join('\n'));
+  assert.ok(lines.some((l) => l.includes('skipped -evil (not a package name)')), lines.join('\n'));
 });
 
 test('apply: no package installed means this app\'s options are not written', async () => {

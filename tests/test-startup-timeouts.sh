@@ -104,7 +104,7 @@ config_pip_packages=''
 started=$SECONDS
 auto_install_packages
 [ $((SECONDS - started)) -lt 10 ] || fail "a hanging apk package must not block startup"
-grep -qx 'git' "$PERSIST_INSTALL_LOG" || fail "the package after a hanging one must still be installed"
+grep -qx -- '--apk git' "$PERSIST_INSTALL_LOG" || fail "the package after a hanging one must still be installed"
 grep -qx "warning|Auto-install of hang timed out after 1s" "$log" || \
     fail "a hanging apk package must be logged as a timeout"
 

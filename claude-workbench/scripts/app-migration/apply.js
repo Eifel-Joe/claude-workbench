@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { isApkName, isPipSpec } = require('./package-names');
 
 // Verified on HA-Test (plan Task 0): the partial backup is a tar holding
 // <slug>.tar.gz, whose data/ is the app's /data. That archive also carries
@@ -225,9 +226,17 @@ async function apply(client, p, offer, selected, deps = {}) {
 
   await step('packages', async () => {
     const failed = [];
-    const pipWanted = uniquePip([...offer.pip, ...pipNamesFromVenv(old.oldData)]);
-    log(`  Installing packages: apk: ${offer.apk.join(' ') || '-'} | pip: ${pipWanted.join(' ') || '-'}`);
-    const apk = offer.apk.filter((pkg) => install([pkg]) || (failed.push(pkg), false));
+    // n30: a name that is not one package (a leading - would be a flag for
+    // persist-install, apk or pip) is skipped with a line, not counted as a
+    // failure: a typo in the old app's list must not keep it running. detect
+    // filters the options already; the venv's directory names and an offer
+    // written by an older version are checked here. apk names go after --apk,
+    // where `ha` or `python` can no longer start another persist-install mode.
+    const keep = (check) => (name) => check(name) || (log(`  skipped ${name} (not a package name)`), false);
+    const apkWanted = offer.apk.filter(keep(isApkName));
+    const pipWanted = uniquePip([...offer.pip, ...pipNamesFromVenv(old.oldData)]).filter(keep(isPipSpec));
+    log(`  Installing packages: apk: ${apkWanted.join(' ') || '-'} | pip: ${pipWanted.join(' ') || '-'}`);
+    const apk = apkWanted.filter((pkg) => install(['--apk', pkg]) || (failed.push(pkg), false));
     // One pip run resolves all versions together and is much faster; only if
     // it fails, retry one by one to find the culprit(s).
     const pip = pipWanted.length && install(['--python', ...pipWanted])

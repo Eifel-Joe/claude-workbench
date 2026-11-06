@@ -15,6 +15,7 @@ node --test "$tests_dir/test-app-migration.js"
 node --test "$tests_dir/test-auto-continue.js"
 "$tests_dir/test-startup-hardening.sh"
 "$tests_dir/test-persist-install.sh"
+"$tests_dir/test-package-names.sh"
 "$tests_dir/test-alpine-migration.sh"
 "$tests_dir/test-cpu-check.sh"
 "$tests_dir/test-npm-cache.sh"
@@ -29,6 +30,7 @@ node --test "$tests_dir/test-auto-continue.js"
 "$tests_dir/test-auto-continue-cmd.sh"
 "$tests_dir/test-ha-plugin.sh"
 "$tests_dir/test-statusline.sh"
+"$tests_dir/test-migration-undecided.sh"
 
 # The image service is the ingress entry point. Its suite needs node and the
 # service's dependencies; skip loudly rather than pretend it ran.

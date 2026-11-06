@@ -1,14 +1,30 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { isApkName, isPipSpec } = require('./package-names');
 
 const OLD_SLUG_SUFFIX = '_claude_terminal_pro';
 // Options worth carrying over. use_persistent_claude/auto_update_claude_on_start
 // are deliberately left out: off in the old app, they froze the Claude version.
+// statusline and home_assistant_plugin exist under these names in ESJavadex's
+// app (2.5.x, from which ours come); our own app before the rename never had
+// them (n31).
 const SETTING_KEYS = [
   'auto_launch_claude', 'dangerously_skip_permissions', 'tmux_mouse',
   'remote_control', 'remote_control_session_name',
+  'statusline', 'home_assistant_plugin',
 ];
+
+// ESJavadex's app calls its Remote Control switch enable_remote_control
+// (a797b7c6) and starts the session as --remote-control 'Home Assistant'; our
+// own app before the rename had remote_control (72fcb99c), which wins when an
+// app has both. Mapped to our names, so the session keeps its name (n31).
+function remoteControlFromEsjavadex(options, settings) {
+  if ('remote_control' in options || typeof options.enable_remote_control !== 'boolean') return settings;
+  const mapped = { remote_control: options.enable_remote_control };
+  if (options.enable_remote_control) mapped.remote_control_session_name = 'Home Assistant';
+  return { ...settings, ...mapped };
+}
 
 function readState(p) {
   try { return fs.readFileSync(p.state, 'utf8').trim(); } catch { return ''; }
@@ -60,9 +76,13 @@ async function detect(client, p) {
     version: info.version || old.version || '',
     // info.repository is the store's repository hash; url is the app's homepage.
     repository: info.url || info.repository || '',
-    apk: listOption(options.persistent_apk_packages),
-    pip: listOption(options.persistent_pip_packages),
-    settings: Object.fromEntries(SETTING_KEYS.filter((k) => k in options).map((k) => [k, options[k]])),
+    // Only real package names (n30): the dialog shows nothing that would be
+    // skipped, apply checks again (venv names, offers from older versions).
+    apk: listOption(options.persistent_apk_packages).filter(isApkName),
+    pip: listOption(options.persistent_pip_packages).filter(isPipSpec),
+    settings: remoteControlFromEsjavadex(options,
+      // null: the Supervisor would refuse it for our schema, failing the step.
+      Object.fromEntries(SETTING_KEYS.filter((k) => k in options && options[k] !== null).map((k) => [k, options[k]]))),
   };
   fs.mkdirSync(p.dir, { recursive: true });
   // Atomic: the terminal must never read a half-written offer.

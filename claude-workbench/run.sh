@@ -25,6 +25,19 @@ OPTION_READ_GAVE_UP="${OPTION_READ_GAVE_UP:-/tmp/.claude-workbench-options-unans
 # Overridable for tests only (tests/test-command-path.sh).
 PERSIST_PATHS="${PERSIST_PATHS:-/data/packages/bin:/data/packages/python/venv/bin:/data/home/.local/bin}"
 
+# What counts as one package in persistent_apk_packages / persistent_pip_packages
+# (n30, auto_install_packages). Both must start with a letter or digit, so no
+# entry can reach persist-install, apk or pip as a flag. apk: name, version pin
+# (git=2.47.0-r0), cmd:/so: provides, @repository tags. pip: name with extras and
+# version specifiers (pandas[all], foo>=1,<2). In variables without backslashes:
+# `]` first in the class is a literal `]`, `-` last a literal `-`.
+# From unsnow-iac (08686e1e, 83c6997e, found in miczu71's fork, branch
+# history/unsnow-full); `:` and `@` added for apk here. The app takeover uses
+# the same rules in scripts/app-migration/package-names.js
+# (tests/test-package-names.sh compares both).
+APK_NAME_RE='^[A-Za-z0-9][A-Za-z0-9._+=<>~:@-]*$'
+PIP_SPEC_RE='^[A-Za-z0-9][]A-Za-z0-9._+=!~,<>[-]*$'
+
 # npm's download cache; overridable for tests only (tests/test-npm-cache.sh).
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-/tmp/npm-cache}"
 NPM_LEGACY_CACHE_DIR="${NPM_LEGACY_CACHE_DIR:-/data/home/.npm}"
@@ -789,8 +802,16 @@ setup_persistent_claude() {
 
 # An offer to take over Claude data from an older app installed alongside waits for the
 # terminal (detect_app_migration writes it, with_migration_dialog shows it).
+# Undecided counts as pending too (n33): while the check could not decide
+# (Supervisor error, time limit, crash), an old app may be there, and an offer
+# made on a later start would find what the status line and the plugin wrote
+# (settings.json, plugin lists, ~/.claude.json from `claude plugin`) and keep
+# the old app's files out - the takeover never replaces existing files.
+# Rejected: merging those files during the takeover (three formats that Claude
+# owns and changes). tests/test-migration-undecided.sh.
 migration_offer_pending() {
-    [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ]
+    [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ] \
+        || [ -f "${APP_MIGRATION_UNDECIDED:-/data/migration/undecided}" ]
 }
 
 # Whether the Supervisor answered the option request this start. read_option
@@ -848,6 +869,9 @@ setup_ha_plugin() {
     local plugin_id="homeassistant-config@${marketplace}"
     local manifest="$marketplace_dir/homeassistant-config/.claude-plugin/plugin.json"
     local state_file="${HA_PLUGIN_STATE:-$HOME/.claude/plugins/.claude-workbench-ha-plugin}"
+    # ESJavadex's app keeps the same "<on>:<version>" record here (42c53d48);
+    # the data takeover copies it along with ~/.claude (n31).
+    local old_state_file="${HA_PLUGIN_OLD_STATE:-$HOME/.claude/plugins/.addon-ha-plugin}"
     local enabled bundled wanted previous='' installed='' list
 
     if [ ! -f "$manifest" ]; then
@@ -870,7 +894,7 @@ setup_ha_plugin() {
         fi
     fi
     if migration_offer_pending; then
-        bashio::log.info "Home Assistant plugin: a data takeover offer is open, set up on the next start"
+        bashio::log.info "Home Assistant plugin: a data takeover offer is open or could not be checked, set up on the next start"
         return 0
     fi
     if ! options_readable; then
@@ -888,6 +912,11 @@ setup_ha_plugin() {
     wanted="${enabled}:${bundled}"
     if [ -f "$state_file" ]; then
         previous=$(cat "$state_file" 2> /dev/null) || previous=''
+    elif [ -f "$old_state_file" ]; then
+        # Taken over from ESJavadex's app (n31): without its record a plugin
+        # the user removed there by hand would be installed again, and one the
+        # old option had switched off would not be switched on by ours.
+        previous=$(cat "$old_state_file" 2> /dev/null) || previous=''
     fi
     if [ "$previous" = "$wanted" ]; then
         bashio::log.info "Home Assistant plugin: ${bundled}, home_assistant_plugin=${enabled}, nothing to do"
@@ -986,7 +1015,7 @@ setup_statusline() {
         fi
     fi
     if migration_offer_pending; then
-        bashio::log.info "Status line: a data takeover offer is open, set up on the next start"
+        bashio::log.info "Status line: a data takeover offer is open or could not be checked, set up on the next start"
         return 0
     fi
     if ! options_readable; then
@@ -1156,21 +1185,42 @@ auto_install_packages() {
     apk_packages=$(normalize_config_list "$apk_raw")
     pip_packages=$(normalize_config_list "$pip_raw")
 
+    # Every entry is checked before persist-install gets it (n30). Its first
+    # argument picks the mode, so an entry like --ha-cli or -p, but also ha or
+    # python, started another mode, and an entry starting with - reached apk or
+    # pip as a flag. Entries that are not one package name are skipped with a
+    # warning (APK_NAME_RE, PIP_SPEC_RE); apk names go after --apk, where
+    # every name is a package. Rejected: checking in persist-install itself,
+    # which would also block deliberate manual calls such as
+    # `persist-install --python git+https://...`. Idea from unsnow-iac
+    # (08686e1e, 83c6997e). tests/test-package-names.sh.
     if [ -n "$apk_packages" ]; then
         bashio::log.info "Auto-installing system packages from config..."
         while IFS= read -r package; do
-            if [ -n "$package" ]; then
-                bashio::log.info "  Installing: $package"
-                run_with_timeout "$STARTUP_APK_TIMEOUT" "Auto-install of $package" \
-                    "$persist_install" "$package" || bashio::log.warning "Failed to install: $package"
+            package="${package#"${package%%[![:space:]]*}"}"
+            package="${package%"${package##*[![:space:]]}"}"
+            [ -n "$package" ] || continue
+            if [[ ! "$package" =~ $APK_NAME_RE ]]; then
+                bashio::log.warning "  Skipping '$package': not a package name (one package per entry)"
+                continue
             fi
+            bashio::log.info "  Installing: $package"
+            run_with_timeout "$STARTUP_APK_TIMEOUT" "Auto-install of $package" \
+                "$persist_install" --apk "$package" || bashio::log.warning "Failed to install: $package"
         done <<< "$apk_packages"
     fi
 
     if [ -n "$pip_packages" ]; then
         bashio::log.info "Auto-installing Python packages from config..."
         while IFS= read -r package; do
-            [ -n "$package" ] && pip_package_list+=("$package")
+            package="${package#"${package%%[![:space:]]*}"}"
+            package="${package%"${package##*[![:space:]]}"}"
+            [ -n "$package" ] || continue
+            if [[ ! "$package" =~ $PIP_SPEC_RE ]]; then
+                bashio::log.warning "  Skipping '$package': not a package name (one package per entry)"
+                continue
+            fi
+            pip_package_list+=("$package")
         done <<< "$pip_packages"
 
         if [ "${#pip_package_list[@]}" -gt 0 ]; then
@@ -1435,8 +1485,14 @@ wait_for_image_service() {
 # API and writes an offer file; the selection window runs in the terminal.
 detect_app_migration() {
     local cli="${APP_MIGRATION_CLI:-/opt/scripts/app-migration/cli.js}"
+    local undecided="${APP_MIGRATION_UNDECIDED:-/data/migration/undecided}"
     [ -f "$cli" ] || return 0
     local line
+    # Undecided until cli.js has decided and removes it (n33, see
+    # migration_offer_pending); a check that fails or is killed leaves it.
+    if ! { mkdir -p "${undecided%/*}" && : > "$undecided"; } 2> /dev/null; then
+        bashio::log.warning "App migration: could not create $undecided"
+    fi
     while IFS= read -r line; do
         case "$line" in
             WARNING:*) bashio::log.warning "${line#WARNING: }" ;;
@@ -1630,7 +1686,7 @@ main() {
     check_persisted_alpine_release
     detect_app_migration
     # After detect_app_migration: they leave ~/.claude alone while a takeover
-    # offer is open (R1).
+    # offer is open (R1) or the check could not decide (n33).
     setup_ha_plugin
     setup_statusline
     start_web_terminal

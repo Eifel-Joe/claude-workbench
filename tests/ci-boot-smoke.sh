@@ -87,6 +87,14 @@ case "$preview" in
     *"Opus 5.5"*) ;;
     *) fail "ha-statusline --preview shows no model: $preview" ;;
 esac
+# n30: the package name rules judged by the image's bash on musl (the unit
+# tests run them with glibc): taken from /run.sh as written there.
+names_check=$(docker run --rm --entrypoint /bin/bash "$image" -c 'eval "$(grep -E "^(APK_NAME_RE|PIP_SPEC_RE)=" /run.sh)"
+    for n in git git=2.47.0-r0 cmd:ping; do [[ $n =~ $APK_NAME_RE ]] || echo "apk rejects $n"; done
+    for n in --ha-cli -p "git vim"; do [[ $n =~ $APK_NAME_RE ]] && echo "apk accepts $n"; done
+    for n in "pandas[all]" requests==2.31.0 "foo>=1,<2"; do [[ $n =~ $PIP_SPEC_RE ]] || echo "pip rejects $n"; done
+    for n in "-r x" --index-url=x; do [[ $n =~ $PIP_SPEC_RE ]] && echo "pip accepts $n"; done; true' 2>&1)
+[ -z "$names_check" ] || fail "package name rules on musl: $names_check"
 echo "Image: Alpine $release, Python $python, Node $node_major, $tmux_version, musl $musl, claude $claude_out, HA plugin $plugin_version"
 
 # --- 2. /data as Alpine 3.21 left it -----------------------------------------
@@ -177,13 +185,18 @@ in_container '[ -f /data/packages/stale-alpine-3.21/lib/libstdc++.so.6 ]' || \
     fail "the stale libstdc++ copy was not moved out of LD_LIBRARY_PATH"
 [ "$(in_container 'cat /data/packages/.alpine-release')" = "3.24" ] || \
     fail "the Alpine release was not recorded"
-# Options unreadable: plugin and status line leave ~/.claude alone (R2).
-grep -q 'Home Assistant plugin: the app options could not be read' <<< "$log" || \
-    fail "the plugin step did not skip on unreadable options"
-grep -q 'Status line: the app options could not be read' <<< "$log" || \
-    fail "the status line step did not skip on unreadable options"
+# The silent Supervisor leaves the takeover check undecided, so plugin and
+# status line skip before they read their options (n33; R2, unreadable
+# options, is covered by tests/test-ha-plugin.sh and tests/test-statusline.sh)
+# and leave ~/.claude alone; a takeover offered later still finds it untouched.
+in_container "[ -e /data/migration/undecided ]" || \
+    fail "a failed takeover check did not leave /data/migration/undecided"
+grep -q 'Home Assistant plugin: a data takeover offer is open or could not be checked' <<< "$log" || \
+    fail "the plugin step did not skip while the takeover check was undecided"
+grep -q 'Status line: a data takeover offer is open or could not be checked' <<< "$log" || \
+    fail "the status line step did not skip while the takeover check was undecided"
 in_container "[ ! -f /data/home/.claude/settings.json ] || ! jq -e 'has(\"statusLine\")' /data/home/.claude/settings.json" || \
-    fail "a status line was written although the options could not be read"
+    fail "a status line was written although the Supervisor did not answer"
 
 # --- 5. Second start: a broken library copy, no release change (n10) ----------
 
@@ -304,6 +317,12 @@ case "$launch_cmd" in
     *) fail "Claude starts without --remote-control: $launch_cmd" ;;
 esac
 
+# n33: the answering Supervisor lets the takeover check decide (no older app).
+grep -q "App migration: nothing to offer (no-old-app)" <<< "$log" || \
+    fail "the takeover check did not decide: $(grep "App migration" <<< "$log" || true)"
+in_container "[ ! -e /data/migration/undecided ]" || \
+    fail "/data/migration/undecided survived a decided takeover check"
+
 # p19: installed from the bundled copy, enabled, remembered.
 grep -q 'Home Assistant plugin: installed 2.1.4' <<< "$log" || fail "the Home Assistant plugin was not installed"
 plugins=$(docker exec -e HOME=/data/home "$name" claude plugin list --json) || fail "claude plugin list failed"
@@ -314,8 +333,8 @@ jq -e '[.[] | select(.id == "homeassistant-config@claude-homeassistant-plugins" 
 in_container "jq -e '.statusLine.command == \"/usr/local/bin/ha-statusline\" and .statusLine.refreshInterval == 30' /data/home/.claude/settings.json" \
     > /dev/null || fail "settings.json has no Home Assistant status line"
 grep -q 'Home Assistant status line enabled' <<< "$log" || fail "enabling the status line was not logged"
-# A refresh started elsewhere holds the lock and --refresh then returns at once
-# (review M7), so wait for the line instead of reading it once.
+# --refresh waits for a refresh started elsewhere (n32; until 3.6.3 it returned
+# at once, review M7). The loop below stays as a safety margin.
 in_container 'HOME=/data/home ha-statusline --refresh' || fail "ha-statusline --refresh failed against the Supervisor"
 home_line=''
 for _ in $(seq 1 15); do

@@ -123,14 +123,14 @@ chmod +x "$PERSIST_INSTALL_BIN"
 config_apk_packages=$'tmux\nopenssh-client'
 config_pip_packages=$'requests\nyaml'
 setup_persistent_packages
-printf '%s\n' '---' 'tmux' '---' 'openssh-client' '---' '--python' 'requests' 'yaml' > "$tmp_dir/expected.log"
+printf '%s\n' '---' '--apk' 'tmux' '---' '--apk' 'openssh-client' '---' '--python' 'requests' 'yaml' > "$tmp_dir/expected.log"
 cmp -s "$tmp_dir/expected.log" "$PERSIST_INSTALL_LOG" || fail "newline Bashio lists were not installed correctly"
 
 config_apk_packages='["git","nano"]'
 config_pip_packages='["httpx","ruff"]'
 : > "$PERSIST_INSTALL_LOG"
 setup_persistent_packages
-printf '%s\n' '---' 'git' '---' 'nano' '---' '--python' 'httpx' 'ruff' > "$tmp_dir/expected.log"
+printf '%s\n' '---' '--apk' 'git' '---' '--apk' 'nano' '---' '--python' 'httpx' 'ruff' > "$tmp_dir/expected.log"
 cmp -s "$tmp_dir/expected.log" "$PERSIST_INSTALL_LOG" || fail "JSON Bashio lists were not installed correctly"
 
 config_apk_packages='[]'
@@ -146,7 +146,7 @@ PERSIST_INSTALL_FAIL_ON='missing-package'
 export PERSIST_INSTALL_FAIL_ON
 : > "$PERSIST_INSTALL_LOG"
 setup_persistent_packages
-printf '%s\n' '---' 'missing-package' '---' 'git' > "$tmp_dir/expected.log"
+printf '%s\n' '---' '--apk' 'missing-package' '---' '--apk' 'git' > "$tmp_dir/expected.log"
 cmp -s "$tmp_dir/expected.log" "$PERSIST_INSTALL_LOG" || fail "package failure did not continue safely"
 
 # A pending migration offer puts the selection window in front of Claude.
@@ -160,6 +160,8 @@ printf '{}\n' > "$APP_MIGRATION_OFFER"
 
 # Detection output: "WARNING:" lines become log warnings (prefix stripped).
 APP_MIGRATION_CLI="$tmp_dir/cli.js"
+# The marker detect_app_migration creates first (n33); /data does not exist here.
+APP_MIGRATION_UNDECIDED="$tmp_dir/migration/undecided"
 : > "$APP_MIGRATION_CLI"
 node() { printf '%s\n' 'App migration: nothing to offer (state)' 'WARNING: App migration: detection failed, skipping (x)'; }
 bashio::log.info() { printf 'info|%s\n' "$*" >> "$tmp_dir/migration.log"; }

@@ -1,5 +1,54 @@
 # Changelog
 
+## 3.6.4
+
+### 🛠️ Improvement - Package names from the options are checked first
+- **An entry under the persistent package options could start something
+  else.** The installer reads its first word as what to do, so an entry like
+  `--ha-cli` or `-p` - or even `ha` or `python` - started another mode, and an
+  entry starting with `-` reached apk or pip as a switch. Entries that are not
+  one package name are now skipped with a warning in the log; version pins and
+  extras still work (`git=2.47.0-r0`, `cmd:ping`, `pandas[all]`,
+  `requests==2.31.0`). pip URLs and paths are no longer taken from the option;
+  install those by hand with `persist-install --python`.
+- **`persist-install --apk <packages>`** is the new explicit form for system
+  packages; the app uses it for the option, so every name is a package.
+- **The data takeover from an older app checks the same way.** Its package
+  lists and the names found in its Python venv went to the installer
+  unchecked. A skipped name does not count as a failure, so it does not keep
+  the old app running.
+- Thanks to **unsnow-iac** for the check (`08686e1e`, found in miczu71's fork,
+  branch `history/unsnow-full`; fixed in `83c6997e`). Added here: `:` and `@`
+  for apk names, `--apk`, and the takeover.
+
+### 🛠️ Improvement - The data takeover brings status line, plugin and Remote Control along
+- **`statusline` and `home_assistant_plugin`** from ESJavadex's Claude
+  Terminal Pro are taken over; they have the same names and meaning there.
+- **Remote Control from ESJavadex's app was lost so far:** it is called
+  `enable_remote_control` there. It now becomes `remote_control`, with the
+  session name "Home Assistant" it had there.
+- **A plugin removed by hand in the old app stays removed:** the app now reads
+  the old app's plugin record when it has none of its own.
+- Status line and plugin are by **ESJavadex** (ESJavadex/claude-code-ha).
+
+### 🐛 Bug Fix - `ha-statusline --refresh` waits for a refresh already running
+- **It reported success and did nothing** while the status line was
+  refreshing in the background, so a manual check could still show the old
+  state. It now waits up to 30 seconds and refreshes itself, or says that
+  another refresh is still running. The background refresh still never waits.
+  Status line by **ESJavadex**.
+
+### 🐛 Bug Fix - A takeover offered on a later start keeps your old Claude settings
+- **If the check for an older app failed on the first start** (e.g. the
+  Supervisor did not answer), the status line and the plugin set themselves
+  up. A takeover offered on a later start then found Claude's settings, its
+  plugin lists and `~/.claude.json` already there and left the old app's
+  files out (the takeover never replaces files). Until the check has decided,
+  status line and plugin now wait, as they do while an offer is open.
+- If the check keeps failing, status line and plugin appear once you are
+  signed in to Claude and the app has restarted. Status line and plugin by
+  **ESJavadex**.
+
 ## 3.6.3
 
 ### 🐛 Bug Fix - Your persistent programs come first in Claude's terminal again
