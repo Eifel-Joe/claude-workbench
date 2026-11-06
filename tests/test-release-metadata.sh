@@ -305,4 +305,21 @@ fi
 grep -q 'every signed-in Home Assistant user' "$addon_dir/README.md" || \
     fail "README.md security section does not say who can open the panel"
 
+# The Home Assistant plugin for Claude (p19): on by default (the user's choice
+# for 3.6.2), pinned to a tag AND its commit, so a moved tag fails the build
+# instead of shipping other code; its MIT LICENSE stays in the image copy.
+grep -qE '^  home_assistant_plugin: true\s*$' "$addon_dir/config.yaml" || \
+    fail "config.yaml options need 'home_assistant_plugin: true'"
+grep -qE '^  home_assistant_plugin: bool\?\s*$' "$addon_dir/config.yaml" || \
+    fail "config.yaml schema needs 'home_assistant_plugin: bool?'"
+grep -qE '^ARG HA_PLUGINS_REF=v[0-9]+\.[0-9]+\.[0-9]+$' "$dockerfile" || \
+    fail "Dockerfile does not pin the plugin release (ARG HA_PLUGINS_REF=vX.Y.Z)"
+grep -qE '^ARG HA_PLUGINS_COMMIT=[0-9a-f]{40}$' "$dockerfile" || \
+    fail "Dockerfile does not pin the plugin release's commit (ARG HA_PLUGINS_COMMIT=<sha>)"
+grep -q 'rev-parse HEAD' "$dockerfile" || \
+    fail "Dockerfile does not check the cloned plugin against HA_PLUGINS_COMMIT"
+if grep -E 'rm -rf .*LICENSE' "$dockerfile"; then
+    fail "Dockerfile removes the plugin's LICENSE; MIT requires the notice to ship"
+fi
+
 echo "Release metadata suite passed (version $config_version)"

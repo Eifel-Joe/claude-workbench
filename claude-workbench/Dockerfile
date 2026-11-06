@@ -124,6 +124,24 @@ RUN case "$(cat /etc/addon-arch)" in \
     rm -rf /tmp/gh* && \
     echo "GitHub CLI v${GH_VERSION} installed successfully"
 
+# Home Assistant plugin for Claude Code (homeassistant-config by ESJavadex,
+# github.com/ESJavadex/claude-homeassistant-plugins, MIT): current Home
+# Assistant syntax, a YAML check after every edit, /ha-check, /ha-upgrade,
+# /ha-find-duplicates. Installed from this local copy on the first start
+# (setup_ha_plugin in run.sh), so the start needs no network. Pinned to a tag
+# and to that tag's commit: a moved tag fails the build instead of shipping
+# other code. LICENSE stays with the copy (MIT notice). To ship a newer plugin,
+# bump both. Bundling idea from ESJavadex (ESJavadex/claude-code-ha@42c53d48).
+ARG HA_PLUGINS_REF=v2.1.4
+ARG HA_PLUGINS_COMMIT=11ae886bfd74cfa334da138f18ea094807a34cfa
+RUN HA_PLUGINS_DIR=/opt/claude-plugins/claude-homeassistant-plugins \
+    && git clone --quiet --depth 1 --branch "${HA_PLUGINS_REF}" \
+        https://github.com/ESJavadex/claude-homeassistant-plugins.git "${HA_PLUGINS_DIR}" \
+    && test "$(git -C "${HA_PLUGINS_DIR}" rev-parse HEAD)" = "${HA_PLUGINS_COMMIT}" \
+    && rm -rf "${HA_PLUGINS_DIR}/.git" "${HA_PLUGINS_DIR}/.github" "${HA_PLUGINS_DIR}/homeassistant-config/tests" \
+    && test -f "${HA_PLUGINS_DIR}/LICENSE" \
+    && jq -e '.version == "2.1.4"' "${HA_PLUGINS_DIR}/homeassistant-config/.claude-plugin/plugin.json"
+
 # Create directory for Claude configuration and set working directory
 RUN mkdir -p /config/claude-config
 WORKDIR /config

@@ -27,6 +27,7 @@ node --test "$tests_dir/test-auto-continue.js"
 "$tests_dir/test-library-path.sh"
 "$tests_dir/test-command-path.sh"
 "$tests_dir/test-auto-continue-cmd.sh"
+"$tests_dir/test-ha-plugin.sh"
 
 # The image service is the ingress entry point. Its suite needs node and the
 # service's dependencies; skip loudly rather than pretend it ran.

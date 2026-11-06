@@ -32,3 +32,6 @@ configuration:
   auto_continue:
     name: "Nach Nutzungslimit automatisch weitermachen"
     description: "Meldet Claude ein Nutzungslimit, tippt die App eine Minute nach dem Reset „continue“ in die Claude-Sitzung. Claude arbeitet dann ohne Aufsicht weiter, auch mit „Ohne Rückfragen ausführen“. Zur Laufzeit mit dem Knopf ⏩ oder `auto-continue on|off` umschaltbar; nach einem Neustart gilt wieder diese Einstellung."
+  home_assistant_plugin:
+    name: "Home-Assistant-Plugin für Claude"
+    description: "Installiert das mitgelieferte Plugin homeassistant-config von ESJavadex: Claude kennt die aktuelle Home-Assistant-Syntax, prüft jede bearbeitete YAML-Datei und bekommt /ha-check, /ha-upgrade und /ha-find-duplicates. Aus: Plugin wird deaktiviert; auch /plugin kann es abschalten, ein App-Update behält das bei."

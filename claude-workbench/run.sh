@@ -11,6 +11,8 @@ set -o pipefail
 STARTUP_NPM_TIMEOUT="${STARTUP_NPM_TIMEOUT:-300}"
 STARTUP_APK_TIMEOUT="${STARTUP_APK_TIMEOUT:-300}"
 STARTUP_PIP_TIMEOUT="${STARTUP_PIP_TIMEOUT:-900}"
+# One `claude plugin ...` call while setting up the Home Assistant plugin.
+STARTUP_PLUGIN_TIMEOUT="${STARTUP_PLUGIN_TIMEOUT:-60}"
 
 # Time limit for one app option read from the Supervisor, and the marker that
 # says it ran out this start (see read_option). 10 s like the app migration's
@@ -784,6 +786,136 @@ setup_persistent_claude() {
     fi
 }
 
+# An offer to take over Claude data from an older app installed alongside waits for the
+# terminal (detect_app_migration writes it, with_migration_dialog shows it).
+migration_offer_pending() {
+    [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ]
+}
+
+# Whether the Supervisor answered the option request this start. read_option
+# hands back the default on any failure, so a probe reads auto_launch_claude -
+# in every answer, because the Supervisor fills in config.yaml's defaults
+# (supervisor/apps/app.py, App.options) - with a placeholder default. A
+# successful answer is cached by bashio, so this adds no request. Rejected:
+# the placeholder on the option itself (an empty list reads as the default,
+# so `statusline: []` would look unreadable).
+options_readable() {
+    local probe
+    probe=$(read_option 'auto_launch_claude' '__unreadable__')
+    [ "$probe" != '__unreadable__' ]
+}
+
+# One `claude plugin` call for setup_ha_plugin, time-limited, quiet.
+ha_plugin_cli() {
+    run_with_timeout "$STARTUP_PLUGIN_TIMEOUT" "Home Assistant plugin: claude plugin $1" \
+        claude plugin "$@" < /dev/null > /dev/null 2>&1
+}
+
+# The Home Assistant plugin for Claude Code (p19): homeassistant-config from
+# ESJavadex/claude-homeassistant-plugins (MIT), copied into the image at build
+# time (Dockerfile). It teaches Claude current Home Assistant syntax, checks
+# every YAML file Claude edits (PostToolUse hook) and adds /ha-check,
+# /ha-upgrade and /ha-find-duplicates. No network: the marketplace is a local
+# folder.
+#   - first start: register the marketplace, install the plugin
+#   - a newer bundled version: `claude plugin update`, never `install`, which
+#     would switch on a plugin the user turned off with /plugin
+#   - home_assistant_plugin off: disable it (not uninstall); on again: enable
+# Works only when option or bundled version changed (state file). Adapted from
+# ESJavadex (ESJavadex/claude-code-ha@42c53d48). Our changes: read_option
+# instead of `bashio::config ... || x=true` (empty under bashio 0.19.0);
+# run_with_timeout; the state file is written only after success, so a failed
+# install or update is retried on the next start; every step is guarded, the
+# function always returns 0 (set -e, inherit_errexit); nothing is written
+# while a takeover offer is open - the takeover copies the old ~/.claude
+# without replacing existing files, so a settings.json written now would hide
+# the user's old one (R1) - or when the options could not be read, so a silent
+# Supervisor cannot switch on a plugin the user turned off (R2).
+# tests/test-ha-plugin.sh, tests/ci-boot-smoke.sh.
+setup_ha_plugin() {
+    local marketplace_dir="${HA_PLUGIN_MARKETPLACE_DIR:-/opt/claude-plugins/claude-homeassistant-plugins}"
+    local marketplace="claude-homeassistant-plugins"
+    local plugin_id="homeassistant-config@${marketplace}"
+    local manifest="$marketplace_dir/homeassistant-config/.claude-plugin/plugin.json"
+    local state_file="${HA_PLUGIN_STATE:-$HOME/.claude/plugins/.claude-workbench-ha-plugin}"
+    local enabled bundled wanted previous='' installed='' list
+
+    if [ ! -f "$manifest" ]; then
+        bashio::log.info "Home Assistant plugin: not bundled in this image"
+        return 0
+    fi
+    if ! command -v claude > /dev/null 2>&1; then
+        bashio::log.warning "Home Assistant plugin: claude not found, skipping"
+        return 0
+    fi
+    if migration_offer_pending; then
+        bashio::log.info "Home Assistant plugin: a data takeover offer is open, set up on the next start"
+        return 0
+    fi
+    if ! options_readable; then
+        bashio::log.warning "Home Assistant plugin: the app options could not be read, plugin unchanged this start"
+        return 0
+    fi
+    enabled=$(read_option 'home_assistant_plugin' 'true')
+    [ "$enabled" = false ] || enabled=true
+
+    bundled=$(jq -r '.version // empty' "$manifest" 2> /dev/null) || bundled=''
+    if [ -z "$bundled" ]; then
+        bashio::log.warning "Home Assistant plugin: no version in $manifest, skipping"
+        return 0
+    fi
+    wanted="${enabled}:${bundled}"
+    if [ -f "$state_file" ]; then
+        previous=$(cat "$state_file" 2> /dev/null) || previous=''
+    fi
+    if [ "$previous" = "$wanted" ]; then
+        bashio::log.info "Home Assistant plugin: ${bundled}, home_assistant_plugin=${enabled}, nothing to do"
+        return 0
+    fi
+
+    if ! list=$(run_with_timeout "$STARTUP_PLUGIN_TIMEOUT" "Home Assistant plugin: claude plugin list" \
+            claude plugin list --json < /dev/null 2> /dev/null); then
+        bashio::log.warning "Home Assistant plugin: could not list Claude's plugins, will retry on next start"
+        return 0
+    fi
+    installed=$(jq -r --arg id "$plugin_id" 'first(.[]? | select(.id == $id) | .version) // empty' \
+        <<< "$list" 2> /dev/null) || installed=''
+
+    if [ "$enabled" = true ]; then
+        ha_plugin_cli marketplace add "$marketplace_dir" || true
+        if [ -z "$installed" ]; then
+            if ! ha_plugin_cli install "$plugin_id"; then
+                bashio::log.warning "Home Assistant plugin: install failed, will retry on next start"
+                return 0
+            fi
+            bashio::log.info "Home Assistant plugin: installed ${bundled} (turn off with the home_assistant_plugin option or /plugin)"
+        else
+            if [ "$installed" != "$bundled" ]; then
+                ha_plugin_cli marketplace update "$marketplace" || true
+                if ! ha_plugin_cli update "$plugin_id"; then
+                    bashio::log.warning "Home Assistant plugin: update failed, keeping ${installed}; will retry on next start"
+                    return 0
+                fi
+                bashio::log.info "Home Assistant plugin: updated ${installed} -> ${bundled}"
+            fi
+            # Switched back on through the option. enable fails on a plugin that
+            # is already on (already_in_goal_state), which is fine.
+            if [ "${previous%%:*}" = false ]; then
+                ha_plugin_cli enable "$plugin_id" || true
+                bashio::log.info "Home Assistant plugin: enabled by the home_assistant_plugin option"
+            fi
+        fi
+    elif [ -n "$installed" ]; then
+        ha_plugin_cli disable "$plugin_id" || true
+        bashio::log.info "Home Assistant plugin: disabled by the home_assistant_plugin option"
+    fi
+
+    if ! { mkdir -p "${state_file%/*}" && printf '%s\n' "$wanted" > "$state_file"; } 2> /dev/null; then
+        bashio::log.warning "Home Assistant plugin: could not write ${state_file}; the next start checks the plugin again"
+    fi
+    return 0
+}
+
 # Setup session picker script
 setup_session_picker() {
     # Copy session picker script from built-in location
@@ -1187,13 +1319,13 @@ terminal_library_path() {
 # tests/test-command-path.sh, tests/ci-boot-smoke.sh.
 path_without_persist() {
     local entry rest='' p skip
-    local -a persist parts
-    IFS=: read -ra persist <<< "$PERSIST_PATHS"
-    IFS=: read -ra parts <<< "$PATH"
-    for entry in "${parts[@]}"; do
+    local -a persist_dirs path_parts
+    IFS=: read -ra persist_dirs <<< "$PERSIST_PATHS"
+    IFS=: read -ra path_parts <<< "$PATH"
+    for entry in "${path_parts[@]}"; do
         [ -n "$entry" ] || continue
         skip=false
-        for p in "${persist[@]}"; do
+        for p in "${persist_dirs[@]}"; do
             if [ "$entry" = "$p" ]; then
                 skip=true
             fi
@@ -1307,6 +1439,9 @@ main() {
     setup_persistent_packages
     check_persisted_alpine_release
     detect_app_migration
+    # After detect_app_migration: they leave ~/.claude alone while a takeover
+    # offer is open (R1).
+    setup_ha_plugin
     start_web_terminal
 }
 
