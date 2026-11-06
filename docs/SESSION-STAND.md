@@ -1,5 +1,48 @@
 # Sitzungsstand
 
+## 2026-11-06 (21) — 3.6.2 Statuszeile, HA-Plugin, System-PATH, null-Optionen (p18, p19, n20, n21)
+
+### Stand
+- Spec `docs/specs/2026-11-06-round-3.6.2-design.md`, Plan `docs/plans/2026-11-06-round-3.6.2.md`,
+  Branch `feat/round-3.6.2`. Freigabe des Users („Freigeben“; Statuszeile an, Plugin an).
+- n21: `read_option` macht aus bashios `null` (`${2:-null}`, bashio 0.19.0 `lib/config.sh`) leer.
+  Laut Supervisor-Quelltext (`apps/app.py`) füllt der Supervisor fehlende Optionen mit den
+  Voreinstellungen auf, der Fall ist also selten.
+- n20: `boot_path`/`terminal_path`, `PERSIST_PATHS`; Sitzung per `tmux new-session -e PATH=…`,
+  Wrapper bekommt die Funktionen per `declare -f`. Übernahme-Dialog ruft `/usr/bin/node`.
+  Idee unsnow-iac (`08686e1e`, `83c6997e`, Fork miczu71).
+- p19: Plugin v2.1.4 (Commit `11ae886b`, MIT) im Image; `setup_ha_plugin` mit Merkdatei
+  `~/.claude/plugins/.claude-workbench-ha-plugin`, R1 (offenes Übernahme-Angebot), R2
+  (`options_readable`), CPU-Prüfung, eine Zeitlimit-Abbruch-Kette, von Hand entfernt bleibt entfernt.
+- p18: `scripts/ha-statusline.sh` (ESJavadex, nsleigh, Stil susomejias), curl absolut mit
+  `-q --noproxy '*'`; `setup_statusline` abgesichert, R1/R2.
+- Lokal grün (Git Bash, jq 1.7.1 aus `.tmp/bin`): test-option-null, -command-path, -ha-plugin,
+  -statusline, -library-path, -tmux-config, -option-timeout, -image-retention, -alpine-migration,
+  -claude-assets, -npm-cache, -startup-timeouts, -startup-order, -release-metadata; shellcheck wie CI.
+- Opus-Review: kein Critical. Behoben: I1 (CPU ohne x86-64-v2), M1 (unerwartete `list`-Form),
+  M2 (von Hand entfernt), M4 (Abbruchkette), M5 (curlrc/Proxy), M6 (`node` im Dialog), M7
+  (CI wartet auf die Hauszeile). Nicht übernommen: M3 (bashio schreibt auf `LOG_FD`, die Warnung
+  bleibt sichtbar).
+- unbestätigt bis CI: Boot-Test mit drittem Start (antwortender Supervisor), `claude plugin …` ohne
+  Anmeldung, hadolint für den Plugin-Block, `test-production-run.sh`.
+
+### Verworfen
+- Platzhalter-Voreinstellung direkt an `statusline`: `[]` wäre von „unlesbar“ nicht zu unterscheiden.
+- `settings.json` in `apply.js` zusammenführen (R1): größerer Eingriff in die Übernahme.
+
+### Fallen
+- Windows-jq schreibt CRLF: Wrapper mit `-b`. Git Bash wandelt `/d/…`-Argumente für native
+  Programme in `D:/…` (jq `--arg`, curl `file://` braucht `cygpath -m`).
+- Prozessstart unter Last bis 7 s: Zeitlimits in Tests nicht unter 10 s.
+- Der Metadaten-Test verbietet „Claude Terminal“ in `run.sh`/`scripts`; Texte zur Übernahme neutral halten.
+
+### Nächste Schritte
+- PR-Text freigeben, PR, CI grün; danach Hauptsitzung: Merge, Release (Notes:
+  `docs/release-notes-3.6.2.md`), HA-Update, Prod-Testplan aus der Spec („Ende-zu-Ende-Kriterium“).
+
+### Empfohlene Skills
+- `task-loop`, `release-weg`, `superpowers:systematic-debugging` bei rotem Boot-Test.
+
 ## 2026-11-05 (20) — 3.6.1 Start robuster (n11, n10)
 
 ### Stand
