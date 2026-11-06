@@ -18,6 +18,11 @@ STARTUP_PIP_TIMEOUT="${STARTUP_PIP_TIMEOUT:-900}"
 OPTION_READ_TIMEOUT="${OPTION_READ_TIMEOUT:-10}"
 OPTION_READ_GAVE_UP="${OPTION_READ_GAVE_UP:-/tmp/.claude-workbench-options-unanswered}"
 
+# The folders persist-install fills with programs: last on PATH for run.sh and
+# the app's services, first in the terminal session (boot_path, terminal_path).
+# Overridable for tests only (tests/test-command-path.sh).
+PERSIST_PATHS="${PERSIST_PATHS:-/data/packages/bin:/data/packages/python/venv/bin:/data/home/.local/bin}"
+
 # npm's download cache; overridable for tests only (tests/test-npm-cache.sh).
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-/tmp/npm-cache}"
 NPM_LEGACY_CACHE_DIR="${NPM_LEGACY_CACHE_DIR:-/data/home/.npm}"
@@ -223,8 +228,11 @@ init_environment() {
     # (which controls permission prompts, not whether Claude can launch).
     export IS_SANDBOX=1
 
-    # Setup persistent package paths (HIGHEST PRIORITY)
-    export PATH="$persist_bin:$persist_python/venv/bin:$data_home/.local/bin:$PATH"
+    # The system's programs first, the persistent folders after them (n20,
+    # boot_path); the terminal session gets them first (terminal_path).
+    local boot
+    boot=$(boot_path)
+    export PATH="$boot"
     # $persist_lib is deliberately NOT on run.sh's own LD_LIBRARY_PATH (n10):
     # the loader searches it before the system's libraries, so one broken copy
     # from persist-install took down node (the panel), ttyd and the tmux
@@ -677,16 +685,21 @@ TMUX_EOF
 
     # Wrapper: attach to existing 'claude' session, or create a fresh one that runs the launch command
     # Creates the session again once it ended; same session environment as in
-    # start_web_terminal (terminal_library_path).
-    cat > "$tmux_wrapper" << 'WRAPPER_EOF'
-#!/bin/bash
+    # start_web_terminal: the same functions, copied in (declare -f), with
+    # PERSIST_PATHS as run.sh has it. ttyd runs the wrapper with the boot PATH.
+    {
+        printf '#!/bin/bash\n'
+        printf 'PERSIST_PATHS=%q\n' "$PERSIST_PATHS"
+        declare -f terminal_library_path path_without_persist terminal_path
+        cat << 'WRAPPER_EOF'
 if tmux has-session -t claude 2>/dev/null; then
     exec tmux attach-session -t claude
 else
-    exec tmux new-session -e "LD_LIBRARY_PATH=/data/packages/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+    exec tmux new-session -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
+        -e "PATH=$(terminal_path)" -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
 fi
 WRAPPER_EOF
+    } > "$tmux_wrapper"
     chmod +x "$tmux_wrapper"
 
     bashio::log.info "tmux configured (${tmux_conf})"
@@ -700,9 +713,10 @@ setup_persistent_claude() {
     local persistent_bin="$persistent_root/bin/claude"
     local persistent_package="$persistent_root/lib/node_modules/@anthropic-ai/claude-code/package.json"
     local claude_link="${CLAUDE_BIN_LINK:-/usr/local/bin/claude}"
-    # The native binary's symlink lives in $HOME/.local/bin, which init_environment
-    # puts ahead of /usr/local/bin on PATH. Overwrite it too, or "claude" keeps
-    # resolving to the stale build-time binary even after this override activates.
+    # The native binary's symlink lives in $HOME/.local/bin, which the terminal
+    # session and login shells put ahead of /usr/local/bin on PATH (terminal_path,
+    # profile script). Overwrite it too, or "claude" typed there keeps resolving
+    # to the stale build-time binary even after this override activates.
     local native_bin_link="${CLAUDE_NATIVE_BIN_LINK:-/data/home/.local/bin/claude}"
     local claude_npm_spec="@anthropic-ai/claude-code@latest"
 
@@ -1156,6 +1170,53 @@ terminal_library_path() {
     printf '%s\n' "/data/packages/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 }
 
+# PATH order (n20). Root cause: init_environment put PERSIST_PATHS first on
+# run.sh's own PATH, so every program run.sh and its services start by name -
+# bashio's curl and jq, node for the panel, npm, apk, python3, tmux, ttyd,
+# claude - would run a same-named copy from /data/packages/bin (writable,
+# survives restarts) instead of the image's. Fix: run.sh and its services run
+# with boot_path (the system first, the persistent folders after it, so a
+# program only persist-install has is still found); the tmux session 'claude'
+# gets terminal_path (the persistent folders first) in its session
+# environment, from both places that create it, like terminal_library_path.
+# Login shells keep them first through the profile script. Idea from
+# unsnow-iac (08686e1e, 83c6997e: one PERSIST_PATHS, no duplicate entries;
+# miczu71's fork, branch history/unsnow-full), who put them first again before
+# exec ttyd; here ttyd and the tmux server stay on the boot PATH.
+# Both functions are copied into the tmux-claude wrapper (setup_tmux).
+# tests/test-command-path.sh, tests/ci-boot-smoke.sh.
+path_without_persist() {
+    local entry rest='' p skip
+    local -a persist parts
+    IFS=: read -ra persist <<< "$PERSIST_PATHS"
+    IFS=: read -ra parts <<< "$PATH"
+    for entry in "${parts[@]}"; do
+        [ -n "$entry" ] || continue
+        skip=false
+        for p in "${persist[@]}"; do
+            if [ "$entry" = "$p" ]; then
+                skip=true
+            fi
+        done
+        if [ "$skip" = false ]; then
+            rest="${rest:+$rest:}$entry"
+        fi
+    done
+    printf '%s\n' "$rest"
+}
+
+boot_path() {
+    local rest
+    rest=$(path_without_persist)
+    printf '%s\n' "${rest:+$rest:}$PERSIST_PATHS"
+}
+
+terminal_path() {
+    local rest
+    rest=$(path_without_persist)
+    printf '%s\n' "$PERSIST_PATHS${rest:+:$rest}"
+}
+
 # Start main web terminal
 start_web_terminal() {
     local port=7681
@@ -1182,7 +1243,7 @@ start_web_terminal() {
     if ! tmux has-session -t claude 2>/dev/null; then
         bashio::log.info "Creating persistent tmux session 'claude'..."
         tmux new-session -d -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
-            -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+            -e "PATH=$(terminal_path)" -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
     else
         bashio::log.info "Reusing existing tmux session 'claude'..."
     fi
