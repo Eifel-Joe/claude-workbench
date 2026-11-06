@@ -15,6 +15,9 @@
 - n33: `/data/migration/undecided` (run.sh legt an, `cli.js detect` entfernt bei Entscheidung),
   `migration_offer_pending` prüft beide Dateien. CI-Attrappe beantwortet `/addons/self/info`, `/addons`.
 - Neuer Listenpunkt n40 (späte Installation der alten App; nicht abgedeckt).
+- Opus-Review: kein Critical, kein Important. Alle sechs Minor behoben (`3c5f7220`): liegen gebliebene
+  Sperre beim Warten, `cli.js` eigenes try, DOCS/Options-Hinweise, mehr Tabellenzeilen, musl-Probe im
+  Boot-Test.
 - Lokal grün (Git Bash, jq 1.7.1 aus `.tmp/bin`): siehe Abschnitt Fallen für die Aufrufe.
 - unbestätigt bis CI: `test-production-run.sh`, Boot-Test (undecided nach stummem Start, entfernt nach
   drittem Start).
