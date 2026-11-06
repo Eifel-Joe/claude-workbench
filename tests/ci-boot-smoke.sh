@@ -184,6 +184,10 @@ grep -q 'Status line: the app options could not be read' <<< "$log" || \
     fail "the status line step did not skip on unreadable options"
 in_container "[ ! -f /data/home/.claude/settings.json ] || ! jq -e 'has(\"statusLine\")' /data/home/.claude/settings.json" || \
     fail "a status line was written although the options could not be read"
+# The takeover check could not ask the Supervisor either: it stays undecided,
+# so a takeover offered later still finds ~/.claude untouched (n33).
+in_container "[ -e /data/migration/undecided ]" || \
+    fail "a failed takeover check did not leave /data/migration/undecided"
 
 # --- 5. Second start: a broken library copy, no release change (n10) ----------
 
@@ -303,6 +307,12 @@ case "$launch_cmd" in
     *"--remote-control"*) ;;
     *) fail "Claude starts without --remote-control: $launch_cmd" ;;
 esac
+
+# n33: the answering Supervisor lets the takeover check decide (no older app).
+grep -q "App migration: nothing to offer (no-old-app)" <<< "$log" || \
+    fail "the takeover check did not decide: $(grep "App migration" <<< "$log" || true)"
+in_container "[ ! -e /data/migration/undecided ]" || \
+    fail "/data/migration/undecided survived a decided takeover check"
 
 # p19: installed from the bundled copy, enabled, remembered.
 grep -q 'Home Assistant plugin: installed 2.1.4' <<< "$log" || fail "the Home Assistant plugin was not installed"

@@ -49,6 +49,7 @@ source "$repo_root/claude-workbench/run.sh"
 export HOME="$tmp_dir/home"
 mkdir -p "$HOME"
 export APP_MIGRATION_OFFER="$tmp_dir/offer.json"
+export APP_MIGRATION_UNDECIDED="$tmp_dir/undecided"
 # 10 s: on a loaded Windows machine (Git Bash) starting the fake CLI alone took
 # up to 7 s. The hanging fake sleeps far longer, so a cut-off is still a cut-off.
 export STARTUP_PLUGIN_TIMEOUT=10
@@ -215,6 +216,15 @@ setup_ha_plugin || fail "an open takeover offer must not fail the start"
 [ ! -e "$HOME/.claude" ] || fail "an open takeover offer must leave ~/.claude alone"
 grep -q 'takeover' "$log" || fail "skipping for the takeover not logged: $(cat "$log")"
 rm -f "$APP_MIGRATION_OFFER"
+
+# 10b. The takeover check has not decided yet (n33): same as an open offer.
+: > "$APP_MIGRATION_UNDECIDED"
+reset
+setup_ha_plugin || fail "an undecided takeover check must not fail the start"
+[ -z "$(calls)" ] || fail "an undecided takeover check must not touch the plugin: $(calls)"
+[ ! -e "$HOME/.claude" ] || fail "an undecided takeover check must leave ~/.claude alone"
+grep -q 'could not be checked' "$log" || fail "skipping for the undecided check not logged: $(cat "$log")"
+rm -f "$APP_MIGRATION_UNDECIDED"
 
 # 11. State file cannot be written: a warning, no failure (set -e, inherit_errexit).
 rm -rf "${FAKE:?}"/* "$HOME/.claude"

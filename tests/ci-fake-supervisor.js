@@ -15,8 +15,14 @@ const LOG = process.env.FAKE_LOG || '/tmp/requests.log';
 const options = JSON.parse(process.env.FAKE_OPTIONS || '{}');
 
 const ok = (data) => JSON.stringify({ result: 'ok', data });
+// The takeover check (cli.js detect) sees only this app: it decides "nothing
+// to offer" and removes /data/migration/undecided, so the status line and the
+// plugin get set up (n33).
+const SELF = 'local_claude_workbench';
 const routes = {
   '/addons/self/options/config': () => ok(options),
+  '/addons/self/info': () => ok({ slug: SELF, options }),
+  '/addons': () => ok({ addons: [{ slug: SELF, name: 'Claude Workbench', state: 'started' }] }),
   // Home Assistant's own API answers with the bare list.
   '/core/api/states': () => JSON.stringify([
     { entity_id: 'binary_sensor.kitchen_smoke', state: 'on',

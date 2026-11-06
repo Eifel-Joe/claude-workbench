@@ -11,6 +11,9 @@ function migrationPaths(env = process.env) {
     home: path.join(dataRoot, 'home'),
     dir,
     offer: path.join(dir, 'offer.json'),
+    // Created by run.sh before detection, removed once detection has decided
+    // (cli.js runDetect, n33); run.sh's APP_MIGRATION_UNDECIDED.
+    undecided: path.join(dir, 'undecided'),
     state: path.join(dir, 'state'),
     work: path.join(dir, 'work'),
   };

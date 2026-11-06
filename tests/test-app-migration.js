@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, execFile } = require('node:child_process');
 const { buildBackupFixture, startFakeSupervisor, SELF_SLUG, OLD_SLUG } = require('./fake-supervisor');
 
 const MOD = path.join(__dirname, '..', 'claude-workbench', 'scripts', 'app-migration');
@@ -260,6 +260,46 @@ test('detect: never offers another Claude Workbench as the source', async () => 
   ];
   await withSupervisor({ apps }, async (client, p) => {
     assert.equal((await detect(client, p)).offer.slug, OLD_SLUG);
+  });
+});
+
+// n33: run.sh creates <dir>/undecided before `cli.js detect`; detect removes it
+// once it has decided (offer or nothing to offer). While it lies there, the
+// status line and the plugin leave ~/.claude alone, so a takeover offer that
+// only comes on a later start still finds the old files missing here.
+// Async: the fake Supervisor runs in this process and must keep answering.
+function runCliDetect(p, baseUrl) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [path.join(MOD, 'cli.js'), 'detect'], {
+      env: { ...process.env, MIGRATION_DATA_ROOT: p.dataRoot, SUPERVISOR_API: baseUrl, SUPERVISOR_TOKEN: 'test-token' },
+    }, (err, stdout) => resolve(stdout));
+  });
+}
+
+test('paths: the undecided marker sits next to the offer', () => {
+  const p = migrationPaths({ MIGRATION_DATA_ROOT: '/x' });
+  assert.equal(p.undecided, path.join('/x', 'migration', 'undecided'));
+});
+
+test('cli detect: a decision removes the undecided marker, offer or not', async () => {
+  for (const apps of [undefined, [{ slug: SELF_SLUG, state: 'started' }]]) {
+    await withSupervisor({ apps, oldOptions: OLD_OPTIONS }, async (client, p, sup) => {
+      fs.mkdirSync(p.dir, { recursive: true });
+      fs.writeFileSync(p.undecided, '');
+      const out = await runCliDetect(p, sup.url);
+      assert.equal(fs.existsSync(p.undecided), false, out);
+    });
+  }
+});
+
+test('cli detect: a failed detection leaves the undecided marker', async () => {
+  await withSupervisor({}, async (client, p) => {
+    fs.mkdirSync(p.dir, { recursive: true });
+    fs.writeFileSync(p.undecided, '');
+    const out = await runCliDetect(p, 'http://127.0.0.1:1');
+    assert.match(out, /WARNING: App migration: detection failed/);
+    assert.match(out, /status line and Home Assistant plugin wait for the next start/);
+    assert.equal(fs.existsSync(p.undecided), true);
   });
 });
 

@@ -304,6 +304,7 @@ cd "$tmp_dir"
 export HA_STATUSLINE_BIN="bin/ha-statusline"
 export HA_STATUSLINE_SOURCE="$script"
 export APP_MIGRATION_OFFER="$tmp_dir/offer.json"
+export APP_MIGRATION_UNDECIDED="$tmp_dir/undecided"
 settings="$HOME/.claude/settings.json"
 mkdir -p "$tmp_dir/bin"
 
@@ -404,6 +405,14 @@ setup_statusline || fail "an open takeover offer must not fail the start"
 [ ! -e "$settings" ] || fail "an open takeover offer must leave ~/.claude alone"
 [ -x "$HA_STATUSLINE_BIN" ] || fail "the script must be installed while a takeover offer is open"
 rm -f "$APP_MIGRATION_OFFER"
+
+# The takeover check has not decided yet (n33): same as an open offer
+rm -rf "$HOME/.claude"
+: > "$APP_MIGRATION_UNDECIDED"
+setup_statusline || fail "an undecided takeover check must not fail the start"
+[ ! -e "$settings" ] || fail "an undecided takeover check must leave ~/.claude alone"
+[ -x "$HA_STATUSLINE_BIN" ] || fail "the script must be installed while the takeover check is undecided"
+rm -f "$APP_MIGRATION_UNDECIDED"
 
 # Nothing can be written (e.g. /data full): warnings, never the end of the start
 : > "$HOME/.claude"

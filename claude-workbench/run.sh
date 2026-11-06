@@ -802,8 +802,16 @@ setup_persistent_claude() {
 
 # An offer to take over Claude data from an older app installed alongside waits for the
 # terminal (detect_app_migration writes it, with_migration_dialog shows it).
+# Undecided counts as pending too (n33): while the check could not decide
+# (Supervisor error, time limit, crash), an old app may be there, and an offer
+# made on a later start would find what the status line and the plugin wrote
+# (settings.json, plugin lists, ~/.claude.json from `claude plugin`) and keep
+# the old app's files out - the takeover never replaces existing files.
+# Rejected: merging those files during the takeover (three formats that Claude
+# owns and changes). tests/test-migration-undecided.sh.
 migration_offer_pending() {
-    [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ]
+    [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ] \
+        || [ -f "${APP_MIGRATION_UNDECIDED:-/data/migration/undecided}" ]
 }
 
 # Whether the Supervisor answered the option request this start. read_option
@@ -886,7 +894,7 @@ setup_ha_plugin() {
         fi
     fi
     if migration_offer_pending; then
-        bashio::log.info "Home Assistant plugin: a data takeover offer is open, set up on the next start"
+        bashio::log.info "Home Assistant plugin: a data takeover offer is open or could not be checked, set up on the next start"
         return 0
     fi
     if ! options_readable; then
@@ -1007,7 +1015,7 @@ setup_statusline() {
         fi
     fi
     if migration_offer_pending; then
-        bashio::log.info "Status line: a data takeover offer is open, set up on the next start"
+        bashio::log.info "Status line: a data takeover offer is open or could not be checked, set up on the next start"
         return 0
     fi
     if ! options_readable; then
@@ -1477,8 +1485,14 @@ wait_for_image_service() {
 # API and writes an offer file; the selection window runs in the terminal.
 detect_app_migration() {
     local cli="${APP_MIGRATION_CLI:-/opt/scripts/app-migration/cli.js}"
+    local undecided="${APP_MIGRATION_UNDECIDED:-/data/migration/undecided}"
     [ -f "$cli" ] || return 0
     local line
+    # Undecided until cli.js has decided and removes it (n33, see
+    # migration_offer_pending); a check that fails or is killed leaves it.
+    if ! { mkdir -p "${undecided%/*}" && : > "$undecided"; } 2> /dev/null; then
+        bashio::log.warning "App migration: could not create $undecided"
+    fi
     while IFS= read -r line; do
         case "$line" in
             WARNING:*) bashio::log.warning "${line#WARNING: }" ;;
@@ -1672,7 +1686,7 @@ main() {
     check_persisted_alpine_release
     detect_app_migration
     # After detect_app_migration: they leave ~/.claude alone while a takeover
-    # offer is open (R1).
+    # offer is open (R1) or the check could not decide (n33).
     setup_ha_plugin
     setup_statusline
     start_web_terminal
