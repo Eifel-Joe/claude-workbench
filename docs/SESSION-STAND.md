@@ -1,5 +1,49 @@
 # Sitzungsstand
 
+## 2026-11-05 (20) — 3.6.1 Start robuster (n11, n10)
+
+### Stand
+- Spec `docs/specs/2026-11-05-startup-3.6.1-design.md`, Plan `docs/plans/2026-11-05-startup-3.6.1.md`,
+  Branch `fix/startup-3.6.1`. Freigabe des Users („Freigeben“, über die Hauptsitzung).
+- n11: bashio 0.19.0 ruft curl ohne `--max-time` (Quelltext gelesen). `read_option` gibt bashio in
+  der eigenen Befehlsersetzung eine `curl`-Funktion mit `--max-time 10`; nach einem Zeitlimit legt
+  sie `/tmp/.claude-workbench-options-unanswered` an, die übrigen Abfragen nehmen sofort die
+  Voreinstellung. `main` löscht die Merkdatei.
+- n10: `run.sh` exportiert `LD_LIBRARY_PATH` nicht mehr. Die tmux-Sitzung `claude` bekommt
+  `/data/packages/lib` über `tmux new-session -e` (in `start_web_terminal` und im Wrapper
+  `tmux-claude`), Login-Shells weiter über das Profilskript. Idee von unsnow-iac (`08686e1e`).
+- Neue Suiten `tests/test-option-timeout.sh`, `tests/test-library-path.sh` (lokal RED vor dem Fix,
+  danach grün). CI-Boot-Test: Supervisor-Attrappe, die nie antwortet; zweiter Start mit kaputter
+  `libstdc++` ohne Release-Wechsel, prüft `/proc/<pid>/environ` von node, ttyd, tmux-Server.
+- Lokal grün: `test-option-timeout`, `test-library-path`, `test-tmux-config`, `test-alpine-migration`,
+  `test-startup-order`, `test-startup-timeouts`, `test-image-retention`, `test-release-metadata`,
+  Options-Teil von `test-production-run` isoliert; shellcheck wie CI.
+- Opus-Review: keine Blocker. Behoben: verwaiste `sleep` des Test-Wächters, Bereitschafts-Warten
+  auf die Supervisor-Attrappe, Fehlermeldung bei nicht schreibbarer Merkdatei, strengere Prüfung
+  auf jede Form von `LD_LIBRARY_PATH=` in `run.sh`, `inherit_errexit` in `test-library-path`.
+  Offen gelassen: doppeltes Literal `/data/packages/lib` im Wrapper (kommentiert, Test 3 sichert es).
+- unbestätigt bis CI: Boot-Test mit beiden Szenarien, volle `run-tests.sh`.
+
+### Verworfen
+- `timeout` um die Abfrage: kann keine Funktion starten; über `bash -c` beendet es nur bash, das
+  verwaiste curl hält die Pipe von `$(…)` offen, der Start hängt weiter.
+- `CLAUDE_ENV_FILE`, damit Claude selbst ohne Bibliotheksordner läuft: Zusammenspiel mit
+  SessionStart-Hooks nicht dokumentiert, MCP-Server und Hooks bekämen den Ordner nicht.
+
+### Fallen
+- `PATH` mit `D:/…`-Einträgen (aus `TMPDIR=D:/…`) zerfällt am Laufwerks-Doppelpunkt: in Tests
+  Pfade über `cd … && pwd` in `/d/…`-Form bringen.
+- `bash tests/test-startup-timeouts.sh` nicht mit `/c/WINDOWS/system32` vorn im `PATH` laufen lassen
+  (Windows-`timeout`).
+
+### Nächste Schritte
+- Nach Merge: Prod-Testplan aus der Spec („Ende-zu-Ende-Kriterium“).
+- Punkteliste: n20 „Beim Start die Programme des Systems vor den persistenten Programmen
+  verwenden“ und n21 (leerer Sitzungsname für Remote Control) unter „Neu aufgetaucht“.
+
+### Empfohlene Skills
+- `task-loop`, `release-weg`, `superpowers:systematic-debugging` bei rotem Boot-Test.
+
 ## 2026-11-05 (19) — 3.6.0 Basis-Image Alpine 3.24 (p08)
 
 ### Stand

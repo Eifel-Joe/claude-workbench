@@ -319,7 +319,7 @@ persist-install <package>
 
 - **Location**: `/data/packages/`
 - **Binaries**: `/data/packages/bin/` (in PATH)
-- **Libraries**: `/data/packages/lib/` (in LD_LIBRARY_PATH)
+- **Libraries**: `/data/packages/lib/` (in LD_LIBRARY_PATH of the terminal session, not of the app's services)
 - **Python venv**: `/data/packages/python/venv/`
 - **Persistence**: Survives all reboots, restarts, and updates
 

@@ -241,8 +241,11 @@ persist-install --python package-name
 
 ### Shared library errors (.so files)
 
+The library folder is on `LD_LIBRARY_PATH` in the terminal (the Claude
+session, its windows and login shells), not for the app's own services.
+
 ```bash
-# Check library path
+# Check library path (in the terminal)
 echo $LD_LIBRARY_PATH
 
 # List installed libraries
@@ -270,10 +273,12 @@ such an update takes care of it and says so in the app log:
   `.reinstall-pending` to stop the retries sooner. Packages you installed from
   a local path, a URL or git are not fetched again by name; the log names them
   for a manual reinstall.
-- **Libraries the system also has** (if any): `/data/packages/lib` comes first
-  on `LD_LIBRARY_PATH`, so an old copy of a system library would replace the
-  new one for every program, the app's own included. Such copies are moved to
-  `/data/packages/stale-alpine-<old release>/lib` (nothing is deleted).
+- **Libraries the system also has** (if any): in the terminal,
+  `/data/packages/lib` comes first on `LD_LIBRARY_PATH`, so an old copy of a
+  system library would replace the new one for Claude and your programs. Such
+  copies are moved to `/data/packages/stale-alpine-<old release>/lib` (nothing
+  is deleted). The app's own services (the panel, ttyd, tmux) never use this
+  folder since 3.6.1.
 - **Other files** (if any): the log lists the binaries and libraries that were installed
   on the old release and have no identical copy in the system: `These files
   were installed with persist-install on 3.21 and may not work; reinstall their

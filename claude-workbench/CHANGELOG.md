@@ -1,5 +1,34 @@
 # Changelog
 
+## 3.6.1
+
+### 🐛 Bug Fix - A Supervisor that does not answer no longer stalls the start
+- **The start waits at most 10 seconds for the app options.** The app reads
+  its options from the Supervisor at start. bashio asks without a time limit,
+  so a Supervisor that took the request and never answered held the start
+  forever and the panel stayed blank (rare; already so on Alpine 3.21). The
+  request now ends after 10 seconds and the options use their defaults; the log
+  says so once (`The Supervisor did not answer within 10s ...`). The other
+  options then take their defaults at once instead of waiting 10 seconds each.
+  A Supervisor that answers with an error is handled as before.
+
+### 🛠️ Improvement - Your library copies stay in the terminal
+- **A broken library copy can no longer take down the panel.** Libraries that
+  `persist-install` copied into `/data/packages/lib` came first on
+  `LD_LIBRARY_PATH` for the app's own services too: the panel's Node.js
+  service, ttyd and tmux. One unfit copy could blank the panel; 3.6.0 only
+  caught that on a change of the Alpine release. Now only the terminal session
+  gets the folder: Claude, the session picker, new tmux windows and login
+  shells, where your packages run. Thanks to **unsnow-iac** for the idea of
+  keeping the folder off the app's own environment (commit `08686e1e`, found
+  in miczu71's fork, branch `history/unsnow-full`); here ttyd and tmux stay
+  without it too.
+
+### 🔧 Technical
+- The CI boot test now runs the app next to a stand-in Supervisor that never
+  answers, and starts it a second time with a broken library copy and no
+  release change.
+
 ## 3.6.0
 
 ### 🔧 Technical - Alpine 3.24 base image

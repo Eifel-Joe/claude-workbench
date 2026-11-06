@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # CI only (needs Docker; not part of run-tests.sh): boot the real image the way
-# the Supervisor would, but WITHOUT a Supervisor. Every bashio::config call then
-# fails, which is exactly the path bashio 0.19.0 (Alpine 3.24 base) turned into
-# a startup abort. /data is seeded like an install coming from Alpine 3.21: a
-# Python 3.12 venv with one package, and a broken copy of libstdc++ that
-# persist-install might have left first on LD_LIBRARY_PATH (it would kill node,
-# the panel's entry point, if it stayed there).
+# the Supervisor would, but against a Supervisor that accepts connections and
+# never answers (3.6.1, n11). The first option read runs into read_option's
+# time limit and fails - the path bashio 0.19.0 (Alpine 3.24 base) turned into
+# a startup abort - and the others take their default at once. /data is seeded like an
+# install coming from Alpine 3.21: a Python 3.12 venv with one package, and a
+# broken copy of libstdc++ that persist-install might have left in
+# /data/packages/lib. A second start then finds a broken copy again WITHOUT a
+# release change (n10): the app's services must not load it.
 #
 # Approach from heytcass (d50e6c0d, heytcass/home-assistant-addons#139: boot
 # without a Supervisor) and unsnow-iac (4eaad373: run `claude --version` to
@@ -16,6 +18,8 @@ set -euo pipefail
 
 image="${1:?usage: ci-boot-smoke.sh IMAGE}"
 name=wb-boot
+silent=wb-supervisor
+network=wb-net
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/wb-boot.XXXXXX")
 data="$work/data"
 config="$work/config"
@@ -27,7 +31,8 @@ fail() {
     exit 1
 }
 cleanup() {
-    docker rm -f "$name" >/dev/null 2>&1 || true
+    docker rm -f "$name" "$silent" >/dev/null 2>&1 || true
+    docker network rm "$network" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -81,29 +86,58 @@ ln -s /usr/bin/python3 "$data/packages/python/venv/bin/python3"
 : > "$site/REQUESTED"
 printf 'not a library\n' > "$data/packages/lib/libstdc++.so.6"
 
-# --- 3. Boot without a Supervisor ---------------------------------------------
+# --- 3. Boot against a Supervisor that never answers --------------------------
 
-docker run -d --name "$name" -v "$data:/data" -v "$config:/config" "$image" >/dev/null
-
-up=false
-for _ in $(seq 1 90); do
-    if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != "true" ]; then
-        fail "the container stopped during startup"
-    fi
-    if in_container 'curl -fsS --max-time 2 http://127.0.0.1:7680/health' >/dev/null 2>&1 && \
-            in_container 'pgrep -x ttyd' >/dev/null 2>&1; then
-        up=true
+# The app reaches the Supervisor as http://supervisor (bashio's default). This
+# one accepts every connection on port 80 and never sends a byte back.
+docker network create "$network" >/dev/null
+docker run -d --name "$silent" --network "$network" --network-alias supervisor \
+    --entrypoint node "$image" \
+    -e "require('net').createServer(() => {}).listen(80)" >/dev/null
+# Wait until it listens: a read that finds the port closed fails at once and
+# would never reach the time limit.
+listening=false
+for _ in $(seq 1 30); do
+    if docker exec "$silent" node -e \
+            "require('net').connect(80, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))" \
+            >/dev/null 2>&1; then
+        listening=true
         break
     fi
-    sleep 2
+    sleep 1
 done
-[ "$up" = true ] || fail "the panel (/health on 7680) and ttyd did not both come up within 180 s"
+[ "$listening" = true ] || fail "the stand-in Supervisor does not listen on port 80"
+
+# Starts the app container and waits for the panel and ttyd.
+boot() {
+    local up=false
+    docker run -d --name "$name" --network "$network" \
+        -v "$data:/data" -v "$config:/config" "$image" >/dev/null
+    for _ in $(seq 1 90); do
+        if [ "$(docker inspect -f '{{.State.Running}}' "$name")" != "true" ]; then
+            fail "the container stopped during startup"
+        fi
+        if in_container 'curl -fsS --max-time 2 http://127.0.0.1:7680/health' >/dev/null 2>&1 && \
+                in_container 'pgrep -x ttyd' >/dev/null 2>&1; then
+            up=true
+            break
+        fi
+        sleep 2
+    done
+    [ "$up" = true ] || fail "the panel (/health on 7680) and ttyd did not both come up within 180 s"
+}
+
+boot
 
 # --- 4. What startup did -------------------------------------------------------
 
 log=$(docker logs "$name" 2>&1)
 grep -q 'Something went wrong contacting the API' <<< "$log" || \
     fail "no failed Supervisor API call in the log: the option-read path was not exercised"
+# One wait for the silent Supervisor, then defaults at once (read_option).
+timeouts=$(grep -c 'The Supervisor did not answer within 10s' <<< "$log" || true)
+[ "$timeouts" = 1 ] || \
+    fail "expected the option read to run into its time limit exactly once, saw it $timeouts times"
 grep -q 'Starting web terminal' <<< "$log" || fail "startup never reached the web terminal"
 # A failed read must come back as the default, not empty (bashio returns empty
 # output with status 0 when read on the left of ||).
@@ -123,5 +157,42 @@ in_container '[ -f /data/packages/stale-alpine-3.21/lib/libstdc++.so.6 ]' || \
     fail "the stale libstdc++ copy was not moved out of LD_LIBRARY_PATH"
 [ "$(in_container 'cat /data/packages/.alpine-release')" = "3.24" ] || \
     fail "the Alpine release was not recorded"
+
+# --- 5. Second start: a broken library copy, no release change (n10) ----------
+
+# The quarantine only runs on a release change, so this copy stays where it is.
+# The app's own services must not load it; the terminal session still gets the
+# folder.
+in_container "printf 'not a library\\n' > /data/packages/lib/libstdc++.so.6"
+docker rm -f "$name" >/dev/null
+boot
+
+in_container '[ -f /data/packages/lib/libstdc++.so.6 ]' || \
+    fail "the broken copy was moved: this start was meant to run without a release change"
+library_path_of() {
+    in_container "tr '\\000' '\\n' < /proc/$1/environ | grep '^LD_LIBRARY_PATH=' || true"
+}
+node_pid=$(in_container "pgrep -o -f 'node /opt/image-service/server.js'") || \
+    fail "the image service (node) is not running"
+ttyd_pid=$(in_container 'pgrep -o -x ttyd') || fail "ttyd is not running"
+tmux_pid=$(in_container "tmux display-message -p -t claude '#{pid}'") || \
+    fail "the tmux server does not answer"
+for service in "node:$node_pid" "ttyd:$ttyd_pid" "tmux server:$tmux_pid"; do
+    service_env=$(library_path_of "${service#*:}")
+    case "$service_env" in
+        */data/packages/lib*) fail "${service%%:*} runs with /data/packages/lib on LD_LIBRARY_PATH ($service_env)" ;;
+    esac
+done
+session_env=$(in_container 'tmux show-environment -t claude LD_LIBRARY_PATH') || \
+    fail "the tmux session 'claude' has no LD_LIBRARY_PATH"
+case "$session_env" in
+    LD_LIBRARY_PATH=/data/packages/lib*) ;;
+    *) fail "the tmux session 'claude' lacks /data/packages/lib: $session_env" ;;
+esac
+login_env=$(in_container "bash -lc 'printf %s \"\$LD_LIBRARY_PATH\"'")
+case "$login_env" in
+    /data/packages/lib*) ;;
+    *) fail "a login shell lacks /data/packages/lib: '$login_env'" ;;
+esac
 
 echo "Boot smoke test passed"
