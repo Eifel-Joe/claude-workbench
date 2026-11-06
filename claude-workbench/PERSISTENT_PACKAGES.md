@@ -128,6 +128,14 @@ persistent_pip_packages:
 
 4. **Save** and **Restart** the app
 
+One package per entry. Version pins and extras work (`git=2.47.0-r0`,
+`cmd:ping`, `pandas[all]`, `requests==2.31.0`); an entry that is not one
+package name - two names in one entry, or anything starting with `-` such as
+`--ha-cli` - is skipped with a warning in the log. pip URLs and paths are not
+taken from the option; install those by hand with `persist-install --python`.
+The app installs system packages from the option with `persist-install --apk`,
+where every name is a package (even `ha` or `python`).
+
 ---
 
 ## 📚 Examples

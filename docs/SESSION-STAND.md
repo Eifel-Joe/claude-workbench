@@ -1,5 +1,39 @@
 # Sitzungsstand
 
+## 2026-11-06 (23) — 3.6.4 Paketnamen, Übernahme, Auffrischen, späte Übernahme (n30–n33)
+
+### Stand
+- Spec `docs/specs/2026-11-06-round-3.6.4-design.md`, Plan `docs/plans/2026-11-06-round-3.6.4.md`,
+  Branch `fix/round-3.6.4` von `main` (v3.6.3). Freigabe des Users („Freigeben, mit RC“).
+- n30: `persist-install --apk`; `APK_NAME_RE`/`PIP_SPEC_RE` in `run.sh` (`auto_install_packages`),
+  gleiche Regeln in `scripts/app-migration/package-names.js` (detect + apply), Vergleichstabelle in
+  `tests/test-package-names.sh`. Idee unsnow-iac (`08686e1e`, `83c6997e`).
+- n31: `SETTING_KEYS` + `statusline`, `home_assistant_plugin`; ESJavadex' `enable_remote_control` →
+  `remote_control` + Name „Home Assistant“; `setup_ha_plugin` liest ersatzweise `.addon-ha-plugin`.
+- n32: `ha-statusline --refresh` wartet (`HA_STATUSLINE_REFRESH_WAIT`, 30 s), Hintergrund
+  `--refresh-background`.
+- n33: `/data/migration/undecided` (run.sh legt an, `cli.js detect` entfernt bei Entscheidung),
+  `migration_offer_pending` prüft beide Dateien. CI-Attrappe beantwortet `/addons/self/info`, `/addons`.
+- Neuer Listenpunkt n40 (späte Installation der alten App; nicht abgedeckt).
+- Lokal grün (Git Bash, jq 1.7.1 aus `.tmp/bin`): siehe Abschnitt Fallen für die Aufrufe.
+- unbestätigt bis CI: `test-production-run.sh`, Boot-Test (undecided nach stummem Start, entfernt nach
+  drittem Start).
+
+### Fallen
+- Bash-Suiten mit `TMPDIR=/d/…` laufen lassen, nicht `D:/…`: `mktemp -d` ohne `cd && pwd` liefert sonst
+  `D:/…`, der `PATH`-Eintrag zerfällt am Doppelpunkt und `test-persist-install.sh` ruft das echte
+  Windows-pip (hängt).
+- Git Bash: Schreiben nach `.tmp/bin/jq` überschreibt `jq.exe`, wenn es existiert. Windows-jq deshalb
+  als `jqwin.exe`, Wrapper `jq` mit `-b`.
+- `claude plugin list` legt `~/.claude.json` an (lokal geprüft, Claude Code 2.1.119).
+
+### Nächste Schritte
+- PR-Text freigeben, PR, CI grün; danach Hauptsitzung: Merge, Release (`docs/release-notes-3.6.4.md`),
+  HA-Update, Prüfung nach dem Ende-zu-Ende-Kriterium der Spec.
+
+### Empfohlene Skills
+- `task-loop`, `release-weg`.
+
 ## 2026-11-06 (22) — 3.6.3 erste Pane der Sitzung bekommt die persistenten Ordner vorn (n20)
 
 ### Stand
