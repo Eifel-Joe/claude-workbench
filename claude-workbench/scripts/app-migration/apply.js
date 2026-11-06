@@ -142,14 +142,25 @@ const SETUP_FILES = ['.claude/settings.json', '.claude/plugins/installed_plugins
   '.claude/plugins/known_marketplaces.json'];
 const PLUGIN_RECORD = '.claude/plugins/.claude-workbench-ha-plugin'; // run.sh setup_ha_plugin, HA_PLUGIN_STATE
 
-// Returns the paths (relative to the home) of ours that were set aside.
+// A folder of its own per takeover: one killed after the claude step (before
+// state: done) is offered again, and its second run must not rename over what
+// the first one set aside (review 3.6.5).
+function freeReplacedDir(p, date) {
+  let dir = path.join(p.replaced, date);
+  for (let n = 2; fs.existsSync(dir); n += 1) dir = path.join(p.replaced, `${date}-${n}`);
+  return dir;
+}
+
+// Returns the paths (relative to the home) of ours that were set aside and the
+// folder they went to.
 function setAsideOwnSetup(p, oldHome, date) {
-  if (hasOwnClaudeData(p)) return [];
+  const none = { moved: [], kept: '' };
+  if (hasOwnClaudeData(p)) return none;
   const has = (home, rel) => fs.existsSync(path.join(home, rel));
   const swap = [];
   if (has(oldHome, CLAUDE_JSON)) swap.push(CLAUDE_JSON);
   if (SETUP_FILES.some((rel) => has(oldHome, rel))) swap.push(...SETUP_FILES, PLUGIN_RECORD);
-  if (!swap.some((rel) => has(p.home, rel))) return []; // nothing of ours: copyMissing does it all
+  if (!swap.some((rel) => has(p.home, rel))) return none; // nothing of ours: copyMissing does it all
 
   const staged = [];
   try {
@@ -163,7 +174,7 @@ function setAsideOwnSetup(p, oldHome, date) {
     for (const tmp of staged) fs.rmSync(tmp, { recursive: true, force: true });
     throw e;
   }
-  const kept = path.join(p.replaced, date);
+  const kept = freeReplacedDir(p, date);
   const moved = [];
   for (const rel of swap) {
     const own = path.join(p.home, rel);
@@ -174,7 +185,7 @@ function setAsideOwnSetup(p, oldHome, date) {
     }
     if (fs.existsSync(`${own}.takeover`)) fs.renameSync(`${own}.takeover`, own);
   }
-  return moved;
+  return { moved, kept };
 }
 
 const PIP_BOOTSTRAP = new Set(['pip', 'setuptools', 'wheel']);
@@ -261,8 +272,7 @@ async function apply(client, p, offer, selected, deps = {}) {
 
   await step('claude', () => {
     if (!fs.existsSync(path.join(oldHome, '.claude'))) return 'not found';
-    const moved = setAsideOwnSetup(p, oldHome, opts.date);
-    const kept = path.join(p.replaced, opts.date);
+    const { moved, kept } = setAsideOwnSetup(p, oldHome, opts.date);
     if (moved.length) log(`  Replaced this app's own ${moved.join(', ')} (kept in ${kept})`);
     copyMissing(path.join(oldHome, '.claude'), path.join(p.home, '.claude'),
       (src) => path.basename(src) !== '.credentials.json');

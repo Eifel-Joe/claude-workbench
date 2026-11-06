@@ -454,6 +454,17 @@ test("apply: n40 - the old app's Claude files replace the ones status line and p
   assert.equal(readHome(p, '.claude/CLAUDE.md'), 'old global instructions\n');
 });
 
+test('apply: a second takeover the same day keeps the first one\'s set-aside files', async () => {
+  // An apply killed after the claude step (before state: done) is offered again;
+  // what it set aside the first time must not be overwritten.
+  const { result, p } = await applyOverOwn({ extra: OLD_SETUP },
+    { ...OWN_SETUP, '../migration/replaced/2026-10-06/.claude.json': '{"first":true}' });
+  assert.equal(readReplaced(p, '.claude.json'), '{"first":true}');
+  const second = path.join(p.replaced, '2026-10-06-2');
+  assert.equal(fs.readFileSync(path.join(second, '.claude.json'), 'utf8'), '{"own":true}');
+  assert.equal(result.results.claude, `ok (replaced this app's own Claude settings, kept in ${second})`);
+});
+
 test('apply: an old .claude.json alone replaces only ours', async () => {
   const { result, p } = await applyOverOwn(undefined, OWN_SETUP);
   assert.match(result.results.claude, /^ok \(replaced this app's own Claude settings/);
