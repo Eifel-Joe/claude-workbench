@@ -47,6 +47,7 @@ options:
   image_retention_days: 30
   auto_continue: false
   home_assistant_plugin: true
+  statusline: []
 
 schema:
   auto_launch_claude: bool?
@@ -63,6 +64,8 @@ schema:
   image_retention_days: int(0,3650)?
   auto_continue: bool?
   home_assistant_plugin: bool?
+  statusline:
+    - str?
 
 # Volume mappings for file access
 map:

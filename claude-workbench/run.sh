@@ -916,6 +916,138 @@ setup_ha_plugin() {
     return 0
 }
 
+# The Home Assistant status line under Claude's prompt (p18;
+# scripts/ha-statusline.sh). The statusline option is a list of pieces in
+# display order: a piece name (ha-statusline --segments), --- for a new line,
+# an entity as sensor.x or Label=sensor.x; -sensor.car_* leaves entities out
+# of the home pieces. Empty means the default layout, off turns it off.
+# The script is always installed, so a status line of the user's own can show
+# the home with `ha-statusline --home`. ~/.claude/settings.json only gets our
+# statusLine when it has none or already has ours: one made with /statusline
+# or by hand is never replaced, and off only removes ours.
+# By ESJavadex (ESJavadex/claude-code-ha@ae4f88ec, dde63c98; 7b558af0: the
+# user's command is never logged, it may carry a token). Our changes:
+# read_option in its own assignment (as an argument a failed read vanished);
+# every step guarded, the function always returns 0 (set -e, inherit_errexit:
+# an unguarded mktemp or jq would have ended the start before ttyd); nothing
+# but the script is written while a takeover offer is open (R1) or the options
+# cannot be read (R2), see setup_ha_plugin. tests/test-statusline.sh.
+setup_statusline() {
+    local script_source="${HA_STATUSLINE_SOURCE:-/opt/scripts/ha-statusline.sh}"
+    local script_bin="${HA_STATUSLINE_BIN:-/usr/local/bin/ha-statusline}"
+    local config_file="${HA_STATUSLINE_CONFIG:-/data/.config/ha-statusline.json}"
+    local settings_file="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
+    local raw='' items='' item label entity_id segments='' current tmp next enabled=true
+    local layout='[]' exclude='[]'
+
+    if [ -f "$script_source" ]; then
+        if ! { cp "$script_source" "$script_bin" && chmod 755 "$script_bin"; } 2> /dev/null; then
+            bashio::log.warning "Status line: could not install $script_bin"
+            return 0
+        fi
+    fi
+    if migration_offer_pending; then
+        bashio::log.info "Status line: a data takeover offer is open, set up on the next start"
+        return 0
+    fi
+    if ! options_readable; then
+        bashio::log.warning "Status line: the app options could not be read, status line unchanged this start"
+        return 0
+    fi
+
+    segments=$("$script_bin" --segments 2> /dev/null | tr '\n' ' ') || segments=''
+    segments=" $segments "
+    raw=$(read_option 'statusline' '')
+    items=$(normalize_config_list "$raw") || items=''
+    while IFS= read -r item; do
+        item="${item#"${item%%[![:space:]]*}"}"
+        item="${item%"${item##*[![:space:]]}"}"
+        [ -n "$item" ] || continue
+        if [ "$item" = 'off' ]; then
+            enabled=false
+        elif [ "$item" = '---' ] || [[ "$segments" == *" $item "* ]]; then
+            if next=$(jq -c --arg s "$item" '. + [{s: $s}]' <<< "$layout"); then
+                layout="$next"
+            fi
+        elif [[ "$item" == -* ]]; then
+            item="${item//[[:space:]]/}"
+            if [[ ! "$item" =~ ^-[a-z0-9_*]+\.[a-z0-9_*]+$ ]]; then
+                bashio::log.warning "  Status line: skipping '$item' (to leave entities out, write -sensor.car_battery or -sensor.car_*)"
+                continue
+            fi
+            if next=$(jq -c --arg p "${item#-}" '. + [$p]' <<< "$exclude"); then
+                exclude="$next"
+            fi
+        else
+            if [[ "$item" == *=* ]]; then
+                label="${item%%=*}"
+                entity_id="${item#*=}"
+            else
+                label=''
+                entity_id="$item"
+            fi
+            entity_id="${entity_id//[[:space:]]/}"
+            if [[ ! "$entity_id" =~ ^[a-z0-9_]+\.[a-z0-9_]+$ ]]; then
+                bashio::log.warning "  Status line: skipping '$item' (not a piece name or an entity ID like sensor.living_room_co2)"
+                continue
+            fi
+            if next=$(jq -c --arg id "$entity_id" --arg label "$label" \
+                    '. + [{s: "entity", id: $id, label: ($label | gsub("^\\s+|\\s+$"; "") | .[0:16])}]' <<< "$layout"); then
+                layout="$next"
+            fi
+        fi
+    done <<< "$items"
+
+    # No pieces (only exclusions, or only invalid items) means the default layout
+    if ! { mkdir -p "${config_file%/*}" \
+            && jq -n --argjson l "$layout" --argjson x "$exclude" \
+                '{layout: (if ($l | length) > 0 then $l else null end), exclude: $x}' > "$config_file"; } 2> /dev/null; then
+        bashio::log.warning "Status line: could not write $config_file"
+    fi
+
+    if ! mkdir -p "${settings_file%/*}" 2> /dev/null; then
+        bashio::log.warning "Status line: could not create ${settings_file%/*}"
+        return 0
+    fi
+    if [ ! -s "$settings_file" ]; then
+        [ "$enabled" = true ] || return 0
+        if ! { printf '{}\n' > "$settings_file"; } 2> /dev/null; then
+            bashio::log.warning "Status line: could not write $settings_file"
+            return 0
+        fi
+    fi
+    if ! current=$(jq -r '.statusLine.command // empty' "$settings_file" 2> /dev/null); then
+        bashio::log.warning "Status line: $settings_file is not valid JSON, leaving it alone"
+        return 0
+    fi
+    if ! tmp=$(mktemp "$settings_file.XXXXXX" 2> /dev/null); then
+        bashio::log.warning "Status line: could not write next to $settings_file"
+        return 0
+    fi
+    if [ "$enabled" != true ]; then
+        if [ "$current" = "$script_bin" ]; then
+            if jq 'del(.statusLine)' "$settings_file" > "$tmp" 2> /dev/null && mv -f "$tmp" "$settings_file"; then
+                bashio::log.info "Home Assistant status line turned off"
+            else
+                bashio::log.warning "Status line: could not update $settings_file"
+            fi
+        fi
+    elif [ -z "$current" ] || [ "$current" = "$script_bin" ]; then
+        if jq --arg cmd "$script_bin" \
+                '.statusLine = {type: "command", command: $cmd, padding: 0, refreshInterval: 30}' \
+                "$settings_file" > "$tmp" 2> /dev/null && mv -f "$tmp" "$settings_file"; then
+            bashio::log.info "Home Assistant status line enabled"
+        else
+            bashio::log.warning "Status line: could not update $settings_file"
+        fi
+    else
+        # Not the command itself: it may carry a token in its arguments
+        bashio::log.info "Status line: keeping your own. Add the home to it with: ha-statusline --home"
+    fi
+    rm -f "$tmp"
+    return 0
+}
+
 # Setup session picker script
 setup_session_picker() {
     # Copy session picker script from built-in location
@@ -1442,6 +1574,7 @@ main() {
     # After detect_app_migration: they leave ~/.claude alone while a takeover
     # offer is open (R1).
     setup_ha_plugin
+    setup_statusline
     start_web_terminal
 }
 

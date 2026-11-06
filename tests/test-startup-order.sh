@@ -77,6 +77,13 @@ done
     fail "setup_ha_plugin must run after setup_persistent_claude"
 [ "$(line_of setup_ha_plugin)" -lt "$(line_of start_web_terminal)" ] || \
     fail "setup_ha_plugin must run before start_web_terminal (exec)"
+# The status line writes ~/.claude/settings.json too (R1), after the plugin,
+# whose install also writes there.
+[ -n "$(line_of setup_statusline)" ] || fail "main() does not call setup_statusline"
+[ "$(line_of setup_ha_plugin)" -lt "$(line_of setup_statusline)" ] || \
+    fail "setup_statusline must run after setup_ha_plugin (and so after detect_app_migration)"
+[ "$(line_of setup_statusline)" -lt "$(line_of start_web_terminal)" ] || \
+    fail "setup_statusline must run before start_web_terminal (exec)"
 
 # grep without -q: an early exit would SIGPIPE sed, and under pipefail a
 # found line would read as "not there".

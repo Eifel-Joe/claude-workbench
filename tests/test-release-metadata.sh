@@ -322,4 +322,11 @@ if grep -E 'rm -rf .*LICENSE' "$dockerfile"; then
     fail "Dockerfile removes the plugin's LICENSE; MIT requires the notice to ship"
 fi
 
+# The Home Assistant status line (p18): on by default with the default layout
+# (the user's choice for 3.6.2), a list of pieces like upstream's option.
+grep -qE '^  statusline: \[\]\s*$' "$addon_dir/config.yaml" || \
+    fail "config.yaml options need 'statusline: []'"
+sed -n '/^schema:/,/^[a-z]/p' "$addon_dir/config.yaml" | grep -A1 -E '^  statusline:\s*$' | \
+    grep -qE '^    - str\?\s*$' || fail "config.yaml schema needs 'statusline:' as a list of 'str?'"
+
 echo "Release metadata suite passed (version $config_version)"

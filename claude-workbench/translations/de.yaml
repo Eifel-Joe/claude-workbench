@@ -35,3 +35,6 @@ configuration:
   home_assistant_plugin:
     name: "Home-Assistant-Plugin für Claude"
     description: "Installiert das mitgelieferte Plugin homeassistant-config von ESJavadex: Claude kennt die aktuelle Home-Assistant-Syntax, prüft jede bearbeitete YAML-Datei und bekommt /ha-check, /ha-upgrade und /ha-find-duplicates. Aus: Plugin wird deaktiviert; auch /plugin kann es abschalten, ein App-Update behält das bei."
+  statusline:
+    name: "Statuszeile"
+    description: "Die Leiste unter Claudes Eingabe, ein Baustein pro Eintrag in Anzeigereihenfolge. Claude: model, context, folder, duration, lines, usage, tokens. Haus: alerts, repairs, automations, backup, disk, core, updates, unavailable, battery, people, weather. Eine Entität als sensor.x oder CO2=sensor.x, --- für eine neue Zeile, -sensor.car_* blendet Entitäten aus den Haus-Bausteinen aus. Leer: Standard-Layout; off entfernt sie. Eine mit /statusline selbst gesetzte Statuszeile wird nie ersetzt."
