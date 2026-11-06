@@ -861,6 +861,9 @@ setup_ha_plugin() {
     local plugin_id="homeassistant-config@${marketplace}"
     local manifest="$marketplace_dir/homeassistant-config/.claude-plugin/plugin.json"
     local state_file="${HA_PLUGIN_STATE:-$HOME/.claude/plugins/.claude-workbench-ha-plugin}"
+    # ESJavadex's app keeps the same "<on>:<version>" record here (42c53d48);
+    # the data takeover copies it along with ~/.claude (n31).
+    local old_state_file="${HA_PLUGIN_OLD_STATE:-$HOME/.claude/plugins/.addon-ha-plugin}"
     local enabled bundled wanted previous='' installed='' list
 
     if [ ! -f "$manifest" ]; then
@@ -901,6 +904,11 @@ setup_ha_plugin() {
     wanted="${enabled}:${bundled}"
     if [ -f "$state_file" ]; then
         previous=$(cat "$state_file" 2> /dev/null) || previous=''
+    elif [ -f "$old_state_file" ]; then
+        # Taken over from ESJavadex's app (n31): without its record a plugin
+        # the user removed there by hand would be installed again, and one the
+        # old option had switched off would not be switched on by ours.
+        previous=$(cat "$old_state_file" 2> /dev/null) || previous=''
     fi
     if [ "$previous" = "$wanted" ]; then
         bashio::log.info "Home Assistant plugin: ${bundled}, home_assistant_plugin=${enabled}, nothing to do"

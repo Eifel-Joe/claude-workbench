@@ -281,4 +281,39 @@ calls | grep -q '^install ' && fail "install was still tried after a cut-off: $(
 [ ! -e "$state_file" ] || fail "a cut-off must not write the state file"
 rm -f "$FAKE/hang-after-list"
 
+# 16. Taken over from ESJavadex's app (n31): its state file
+# (~/.claude/plugins/.addon-ha-plugin, same format) stands in for ours. The
+# user had removed the plugin there by hand: it stays removed.
+rm -rf "${FAKE:?}"/* "$HOME/.claude"
+mkdir -p "$HOME/.claude/plugins"
+printf 'true:2.1.5\n' > "$HOME/.claude/plugins/.addon-ha-plugin"
+reset
+setup_ha_plugin || fail "a taken-over state file must not fail the start"
+calls | grep -q '^install ' && fail "a plugin removed by hand in the old app came back: $(calls)"
+[ "$(cat "$state_file")" = 'true:2.1.6' ] || fail "our state file was not written: $(cat "$state_file" 2>/dev/null)"
+grep -q 'removed' "$log" || fail "leaving the removed plugin alone was not logged: $(cat "$log")"
+
+# 17. Taken over and still installed there, off by the old option: our option
+# on switches it back on (previous state false from the old file).
+rm -rf "${FAKE:?}"/* "$HOME/.claude"
+mkdir -p "$HOME/.claude/plugins"
+printf 'false:2.1.6\n' > "$HOME/.claude/plugins/.addon-ha-plugin"
+printf '2.1.6\n' > "$FAKE/version"
+echo false > "$FAKE/enabled"
+reset
+setup_ha_plugin
+calls | grep -qx 'enable homeassistant-config@claude-homeassistant-plugins' || \
+    fail "the option on did not enable a plugin the old app had switched off: $(calls)"
+
+# 18. Our own state file wins over the old one.
+rm -rf "${FAKE:?}"/* "$HOME/.claude"
+mkdir -p "$HOME/.claude/plugins"
+printf 'true:2.1.6\n' > "$HOME/.claude/plugins/.addon-ha-plugin"
+printf 'true:2.1.6\n' > "$state_file"
+printf '2.1.6\n' > "$FAKE/version"
+echo true > "$FAKE/enabled"
+reset
+setup_ha_plugin
+[ -z "$(calls)" ] || fail "with our state file the old one must not matter: $(calls)"
+
 echo "ha plugin setup: all checks passed"

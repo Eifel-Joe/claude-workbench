@@ -28,8 +28,10 @@ data. Choose with the digits 1–6, then press Enter:
 if the old pip did not mark them) · 5. stop the old app and disable its autostart, so
 a host reboot does not bring it back with the shared login (skipped if any item
 failed or Claude data/login was not found) · 6. settings (`auto_launch_claude`,
-`dangerously_skip_permissions`, `tmux_mouse`, `remote_control*`; applied after the
-next restart)
+`dangerously_skip_permissions`, `tmux_mouse`, `remote_control*`, `statusline`,
+`home_assistant_plugin`; ESJavadex's `enable_remote_control` becomes `remote_control`
+with the session name "Home Assistant"; applied after the next restart). Package
+entries that are not one package name (e.g. `--ha-cli`) are skipped.
 
 A partial backup of the old app is created first (progress is shown) and kept under
 Settings → System → Backups. It includes the old app's image (several hundred MB)

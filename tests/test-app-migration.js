@@ -120,6 +120,62 @@ test('detect: offers the old app with its packages and settings', async () => {
   });
 });
 
+// n31: ESJavadex's app has statusline and home_assistant_plugin under our
+// names; its Remote Control switch is enable_remote_control, and it names the
+// session "Home Assistant".
+const ESJ_OPTIONS = {
+  auto_launch_claude: true, tmux_mouse: false, dangerously_skip_permissions: false,
+  enable_remote_control: true, statusline: ['alerts', '---', 'CO2=sensor.co2'], home_assistant_plugin: false,
+  persistent_apk_packages: [], persistent_pip_packages: [],
+};
+
+test('detect: carries the status line, the plugin switch and Remote Control over from ESJavadex\'s app', async () => {
+  await withSupervisor({ oldOptions: ESJ_OPTIONS }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.deepEqual(offer.settings, {
+      auto_launch_claude: true, dangerously_skip_permissions: false, tmux_mouse: false,
+      statusline: ['alerts', '---', 'CO2=sensor.co2'], home_assistant_plugin: false,
+      remote_control: true, remote_control_session_name: 'Home Assistant',
+    });
+  });
+});
+
+test('detect: enable_remote_control off becomes remote_control off, without a name', async () => {
+  await withSupervisor({ oldOptions: { ...ESJ_OPTIONS, enable_remote_control: false } }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.equal(offer.settings.remote_control, false);
+    assert.equal('remote_control_session_name' in offer.settings, false);
+    assert.equal('enable_remote_control' in offer.settings, false);
+  });
+});
+
+test('detect: a null option of the old app is left out, not carried over', async () => {
+  await withSupervisor({ oldOptions: { ...ESJ_OPTIONS, statusline: null } }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.equal('statusline' in offer.settings, false);
+  });
+});
+
+test('detect: an old app with remote_control keeps it, enable_remote_control is ignored', async () => {
+  const oldOptions = { ...ESJ_OPTIONS, remote_control: false, remote_control_session_name: 'Pi', enable_remote_control: true };
+  await withSupervisor({ oldOptions }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.equal(offer.settings.remote_control, false);
+    assert.equal(offer.settings.remote_control_session_name, 'Pi');
+    assert.equal('enable_remote_control' in offer.settings, false);
+  });
+});
+
+test('apply: the carried-over status line and plugin switch land in this app\'s options', async () => {
+  const { result, sup } = await detectThenApply({ oldOptions: ESJ_OPTIONS, ownOptions: { statusline: [], home_assistant_plugin: true } }, ['settings']);
+  assert.equal(result.results.settings, 'ok');
+  assert.deepEqual(sup.state.ownOptions.statusline, ['alerts', '---', 'CO2=sensor.co2']);
+  assert.equal(sup.state.ownOptions.home_assistant_plugin, false);
+  assert.equal(sup.state.ownOptions.remote_control, true);
+  assert.equal(sup.state.ownOptions.remote_control_session_name, 'Home Assistant');
+  assert.equal('enable_remote_control' in sup.state.ownOptions, false);
+});
+
 test('detect: no offer without another Claude Terminal Pro app', async () => {
   const apps = [{ slug: SELF_SLUG, state: 'started' }, { slug: 'core_samba', state: 'started' }];
   await withSupervisor({ apps }, async (client, p) => {
