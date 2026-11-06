@@ -122,4 +122,58 @@ dialog=$(APP_MIGRATION_OFFER="$offer" APP_MIGRATION_CLI=/opt/x/cli.js with_migra
 [ "$dialog" = "/usr/bin/node /opt/x/cli.js dialog; clear" ] || \
     fail "the takeover dialog does not run the image's node: $dialog"
 
+# 6. What the session's first pane really gets (3.6.3; found in the live test
+# of 3.6.2 on HA-Test: the shell from the session picker had the persistent
+# folders last). tmux 3.7c (spawn.c, "Then the PATH environment variable")
+# builds a pane's environment from the session environment (-e) and then
+# replaces PATH with the PATH of the client that runs new-session, as long as
+# that client is not attached. Both places that create the session are such
+# clients, and both have the boot PATH. The stand-in below does exactly that
+# and runs the pane's command, which records what it got. Checking the
+# arguments (cases 2 and 3) or `tmux show-environment` missed this.
+spawn_bin="$tmp_dir/spawn"
+mkdir -p "$spawn_bin"
+cat > "$spawn_bin/tmux" << 'EOF'
+#!/usr/bin/env bash
+[ "$1" = has-session ] && exit 1
+[ "$1" = new-session ] || exit 0
+shift
+env_args=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -d) shift ;;
+        # The session environment; PATH from it is replaced by the client's.
+        -e) case "$2" in PATH=*) ;; *) env_args+=("$2") ;; esac; shift 2 ;;
+        -s) shift 2 ;;
+        *) break ;;
+    esac
+done
+exec env "${env_args[@]}" "$@"
+EOF
+cat > "$fake_bin/record-pane" << EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$PATH" > "$tmp_dir/pane.path"
+printf '%s\n' "\${LD_LIBRARY_PATH-}" > "$tmp_dir/pane.ld"
+EOF
+chmod +x "$spawn_bin/tmux" "$fake_bin/record-pane"
+get_claude_launch_command() { printf 'record-pane\n'; }
+PATH="$spawn_bin:$boot"
+expected_pane_path=$(terminal_path)
+for site in start_web_terminal wrapper; do
+    rm -f "$tmp_dir/pane.path" "$tmp_dir/pane.ld"
+    if [ "$site" = start_web_terminal ]; then
+        ( start_web_terminal ) || fail "start_web_terminal failed with the spawning tmux"
+    else
+        export CLAUDE_LAUNCH_CMD=record-pane
+        bash "$TMUX_WRAPPER_PATH" || fail "the tmux wrapper failed with the spawning tmux"
+    fi
+    [ -f "$tmp_dir/pane.path" ] || fail "$site: the pane's command did not run"
+    [ "$(cat "$tmp_dir/pane.path")" = "$expected_pane_path" ] || \
+        fail "$site: the session's first pane runs with PATH '$(cat "$tmp_dir/pane.path")', expected '$expected_pane_path'"
+    case "$(cat "$tmp_dir/pane.ld")" in
+        /data/packages/lib*) ;;
+        *) fail "$site: the session's first pane lacks /data/packages/lib: '$(cat "$tmp_dir/pane.ld")'" ;;
+    esac
+done
+
 echo "Command path suite passed"
