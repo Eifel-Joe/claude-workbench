@@ -179,10 +179,12 @@ Claude Workbench is maintained by [@Eifel-Joe](https://github.com/Eifel-Joe). It
   AI + Home Assistant work: [Javadex](https://www.javadex.es/)
 - **Tom Cassady** ([@heytcass](https://github.com/heytcass)) — created the original Claude Terminal app
   ([heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons))
-- **Community fork contributions:** [@Moulbi](https://github.com/Moulbi),
+- **Community fork contributions:** [@owine](https://github.com/owine),
+  [@mattbsea](https://github.com/mattbsea), [@Moulbi](https://github.com/Moulbi),
   [@PeterLinuxOSS](https://github.com/PeterLinuxOSS), [@nsleigh](https://github.com/nsleigh),
-  [@marcjay](https://github.com/marcjay), [@martinboksa](https://github.com/martinboksa),
-  [@unsnow-iac](https://github.com/unsnow-iac) —
+  [@marcjay](https://github.com/marcjay), [@weiting-tw](https://github.com/weiting-tw),
+  [@umrath](https://github.com/umrath), [@martinboksa](https://github.com/martinboksa),
+  [@unsnow-iac](https://github.com/unsnow-iac), [@msvinth](https://github.com/msvinth) —
   each change is credited in the [changelog](claude-workbench/CHANGELOG.md)
 - **Status line style:** [susomejias/claude-statusline](https://github.com/susomejias/claude-statusline) (MIT)
 

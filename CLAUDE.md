@@ -8,6 +8,12 @@ This repository contains Home Assistant add-ons, specifically the **Claude Workb
 
 **Origin:** Claude Workbench (Eifel-Joe/claude-workbench) grew out of [ESJavadex/claude-code-ha](https://github.com/ESJavadex/claude-code-ha) (Claude Terminal Pro) by Javier Santos, itself based on [heytcass/home-assistant-addons](https://github.com/heytcass/home-assistant-addons) by Tom Cassady. The ESJavadex app added persistent package management, auto-install configuration, and enhanced documentation.
 
+## Hauptsitzung (main session)
+This project is run by a main session (skill `hauptsitzung`).
+Point list: https://claude.ai/artifact/PPweUanaeCqudQBBwCqoX7, collection `punkte` (skill `punkteliste`). Handover: project memory `handoff-main-session`.
+- If you were started with an assignment as a sub-session, your assignment applies. You do not keep the list; new findings only in the number range from your assignment. Merge, release and delivery are done by the main session.
+- If the user says you should carry on as the main session: load skill `hauptsitzung`, read the handover memory and the list.
+
 ## Development Environment
 
 ### Setup
