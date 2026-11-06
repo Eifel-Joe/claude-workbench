@@ -19,6 +19,7 @@ Install packages that survive container restarts!
 
 USAGE:
     persist-install <package1> [package2] [...]
+    persist-install --apk <package1> [...]    # same, every name is a package
     persist-install --python <package1> [package2] [...]
     persist-install --ha-cli
     persist-install --list
@@ -367,6 +368,20 @@ main() {
         --ha-cli|ha-cli|ha)
             shift
             install_ha_cli "$@"
+            ;;
+        # The explicit form of the default (n30). The first argument picks the
+        # mode, so a package name from the app's options (`ha`, `python`, `list`)
+        # could start another one; after --apk every name is a package. Only the
+        # dashed form: a bare `apk` would block a package of that name.
+        # tests/test-persist-install.sh.
+        --apk)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "❌ Error: No packages specified"
+                echo "Usage: persist-install --apk <package1> [package2] ..."
+                exit 1
+            fi
+            install_system_packages "$@"
             ;;
         "")
             show_help

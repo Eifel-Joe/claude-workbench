@@ -281,4 +281,33 @@ run_with_image_ha "$tmp_dir/img-known" || fail "--ha-cli failed with a recorded 
 grep -q 'v9.9.0' "$tmp_dir/out.log" || \
     fail "--ha-cli did not show the shadowing copy's version: $(cat "$tmp_dir/out.log")"
 
+# --- persist-install --apk (n30) ----------------------------------------------
+# The explicit form the app uses for names from its options: the name after
+# --apk is always a package, never a mode (ha, python, help, list are modes
+# in the first position).
+apk_log="$tmp_dir/apk.log"
+cat > "$fake_bin/apk" <<APK
+#!/bin/sh
+printf '%s\n' "\$*" >> "$apk_log"
+exit 0
+APK
+chmod +x "$fake_bin/apk"
+mkdir -p "$tmp_dir/data-apk"
+for name in ha python help list; do
+    : > "$apk_log"
+    run_persist_install "$tmp_dir/data-apk" 0 --apk "$name" || \
+        fail "--apk $name failed: $(cat "$tmp_dir/out.log")"
+    grep -qx "add --no-cache $name" "$apk_log" || \
+        fail "--apk $name did not reach apk as a package: $(cat "$apk_log")"
+done
+grep -q 'Home Assistant CLI' "$tmp_dir/out.log" && fail "--apk ha started the ha CLI install"
+: > "$apk_log"
+run_persist_install "$tmp_dir/data-apk" 0 --apk git vim || fail "--apk with two packages failed"
+grep -qx 'add --no-cache git vim' "$apk_log" || fail "--apk git vim: $(cat "$apk_log")"
+: > "$apk_log"
+if run_persist_install "$tmp_dir/data-apk" 0 --apk; then
+    fail "--apk without a package must fail"
+fi
+[ ! -s "$apk_log" ] || fail "--apk without a package ran apk: $(cat "$apk_log")"
+
 echo "persist-install tests passed"
