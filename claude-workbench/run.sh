@@ -806,9 +806,18 @@ options_readable() {
 }
 
 # One `claude plugin` call for setup_ha_plugin, time-limited, quiet.
+# After one call ran into the time limit, the others of this start are skipped
+# (HA_PLUGIN_CLI_GAVE_UP): a hanging CLI costs one time limit, not three. Runs
+# in the caller's shell, so the flag survives between calls.
 ha_plugin_cli() {
+    local started=$SECONDS status=0
+    [ "${HA_PLUGIN_CLI_GAVE_UP:-false}" = false ] || return 1
     run_with_timeout "$STARTUP_PLUGIN_TIMEOUT" "Home Assistant plugin: claude plugin $1" \
-        claude plugin "$@" < /dev/null > /dev/null 2>&1
+        claude plugin "$@" < /dev/null > /dev/null 2>&1 || status=$?
+    if [ "$status" -ne 0 ] && [ $((SECONDS - started)) -ge "$STARTUP_PLUGIN_TIMEOUT" ]; then
+        HA_PLUGIN_CLI_GAVE_UP=true
+    fi
+    return "$status"
 }
 
 # The Home Assistant plugin for Claude Code (p19): homeassistant-config from
@@ -848,6 +857,17 @@ setup_ha_plugin() {
         bashio::log.warning "Home Assistant plugin: claude not found, skipping"
         return 0
     fi
+    # Claude hangs on a CPU without x86-64-v2 (cpu-check.sh); every call would
+    # run into the time limit, on every start. Same check as
+    # setup_persistent_claude.
+    if command -v claude_cpu_missing_flags > /dev/null 2>&1; then
+        local cpu_missing
+        cpu_missing=$(claude_cpu_missing_flags)
+        if [ -n "$cpu_missing" ]; then
+            bashio::log.warning "Home Assistant plugin: skipped, Claude Code cannot run on this CPU (missing: ${cpu_missing})"
+            return 0
+        fi
+    fi
     if migration_offer_pending; then
         bashio::log.info "Home Assistant plugin: a data takeover offer is open, set up on the next start"
         return 0
@@ -878,10 +898,28 @@ setup_ha_plugin() {
         bashio::log.warning "Home Assistant plugin: could not list Claude's plugins, will retry on next start"
         return 0
     fi
-    installed=$(jq -r --arg id "$plugin_id" 'first(.[]? | select(.id == $id) | .version) // empty' \
-        <<< "$list" 2> /dev/null) || installed=''
+    # Only an array is understood. Anything else would read as "not
+    # installed", and install switches a plugin back on that the user turned
+    # off; so nothing is done and the next start checks again.
+    if ! installed=$(jq -er --arg id "$plugin_id" \
+            'if type == "array" then (first(.[] | select(.id == $id) | .version) // "") else error end' \
+            <<< "$list" 2> /dev/null); then
+        bashio::log.warning "Home Assistant plugin: unexpected answer from claude plugin list, plugin unchanged this start"
+        return 0
+    fi
 
+    HA_PLUGIN_CLI_GAVE_UP=false
     if [ "$enabled" = true ]; then
+        if [ -z "$installed" ] && [ "${previous%%:*}" = true ]; then
+            # We installed it before and it is gone: the user removed it with
+            # /plugin. A newer bundled version must not bring it back; the
+            # option off and on again reinstalls it.
+            bashio::log.info "Home Assistant plugin: removed by hand, leaving it out (switch home_assistant_plugin off and on to reinstall)"
+            if ! { mkdir -p "${state_file%/*}" && printf '%s\n' "$wanted" > "$state_file"; } 2> /dev/null; then
+                bashio::log.warning "Home Assistant plugin: could not write ${state_file}"
+            fi
+            return 0
+        fi
         ha_plugin_cli marketplace add "$marketplace_dir" || true
         if [ -z "$installed" ]; then
             if ! ha_plugin_cli install "$plugin_id"; then
@@ -1407,12 +1445,15 @@ detect_app_migration() {
 }
 
 # Prefixes the launch command with the selection window while an offer exists.
+# The window runs in the terminal session, where persist-install's folders come
+# first on PATH (terminal_path), so it calls the image's node by its full path,
+# like /usr/local/bin/claude in the launch command (n20).
 with_migration_dialog() {
     local launch_command="$1"
     local offer="${APP_MIGRATION_OFFER:-/data/migration/offer.json}"
     local cli="${APP_MIGRATION_CLI:-/opt/scripts/app-migration/cli.js}"
     if [ -f "$offer" ]; then
-        printf 'node %s dialog; %s\n' "$cli" "$launch_command"
+        printf '/usr/bin/node %s dialog; %s\n' "$cli" "$launch_command"
     else
         printf '%s\n' "$launch_command"
     fi

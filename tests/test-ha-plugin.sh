@@ -49,7 +49,9 @@ source "$repo_root/claude-workbench/run.sh"
 export HOME="$tmp_dir/home"
 mkdir -p "$HOME"
 export APP_MIGRATION_OFFER="$tmp_dir/offer.json"
-export STARTUP_PLUGIN_TIMEOUT=1
+# 10 s: on a loaded Windows machine (Git Bash) starting the fake CLI alone took
+# up to 7 s. The hanging fake sleeps far longer, so a cut-off is still a cut-off.
+export STARTUP_PLUGIN_TIMEOUT=10
 state_file="$HOME/.claude/plugins/.claude-workbench-ha-plugin"
 
 # Bundled marketplace
@@ -71,7 +73,12 @@ cat > "$tmp_dir/bin/claude" << 'SH'
 shift
 echo "$*" >> "$CALLS"
 # exec: timeout must hit the process that hangs, as with the real CLI.
-[ -f "$FAKE/hang" ] && exec sleep 5
+[ -f "$FAKE/hang" ] && exec sleep 60
+[ -f "$FAKE/hang-after-list" ] && [ "$1" != list ] && exec sleep 60
+if [ -f "$FAKE/list-object" ] && [ "$*" = "list --json" ]; then
+    echo '{"plugins":[]}'
+    exit 0
+fi
 [ -f "$FAKE/fail-$1" ] && exit 1
 mkt="$HA_PLUGIN_MARKETPLACE_DIR/homeassistant-config/.claude-plugin/plugin.json"
 id=homeassistant-config@claude-homeassistant-plugins
@@ -180,7 +187,7 @@ touch "$FAKE/hang"
 reset
 started=$SECONDS
 setup_ha_plugin || fail "a hanging CLI must not fail the start"
-[ $((SECONDS - started)) -lt 15 ] || fail "a hanging CLI held the start for $((SECONDS - started))s"
+[ $((SECONDS - started)) -lt 45 ] || fail "a hanging CLI held the start for $((SECONDS - started))s"
 [ ! -e "$state_file" ] || fail "a cut-off install must not write the state file"
 rm -f "$FAKE/hang"
 
@@ -217,5 +224,61 @@ reset
 setup_ha_plugin || fail "an unwritable state file must not fail the start"
 grep -q '^warning|' "$log" || fail "an unwritable state file was not reported: $(cat "$log")"
 rm -f "$HOME/.claude"
+
+# 12. A CPU Claude cannot run on (no x86-64-v2): claude would hang into the
+# time limit on every start, so it is not called at all (review I1).
+rm -rf "${FAKE:?}"/* "$HOME/.claude"
+claude_cpu_missing_flags() { printf 'sse4_2\n'; }
+reset
+setup_ha_plugin || fail "a CPU without x86-64-v2 must not fail the start"
+[ -z "$(calls)" ] || fail "claude was called on a CPU it cannot run on: $(calls)"
+grep -q 'cannot run on this CPU' "$log" || fail "skipping for the CPU not logged: $(cat "$log")"
+unset -f claude_cpu_missing_flags
+
+# 13. An unexpected `plugin list --json` shape: nothing installed, which could
+# switch on a plugin the user turned off; no state, so the next start checks
+# again (review M1).
+touch "$FAKE/list-object"
+reset
+setup_ha_plugin || fail "an unexpected list shape must not fail the start"
+calls | grep -q '^install ' && fail "an unexpected list shape led to an install: $(calls)"
+[ ! -e "$state_file" ] || fail "an unexpected list shape must not write the state file"
+grep -q '^warning|Home Assistant plugin: unexpected' "$log" || fail "unexpected list shape not logged: $(cat "$log")"
+rm -f "$FAKE/list-object"
+
+# 14. Removed by hand after we installed it: a newer bundled version does not
+# bring it back; switching the option off and on reinstalls it (review M2).
+bundle 2.1.5
+reset
+setup_ha_plugin
+[ -f "$FAKE/version" ] || fail "setup for case 14 did not install"
+rm -f "$FAKE/version" "$FAKE/enabled"
+bundle 2.1.6
+reset
+setup_ha_plugin
+calls | grep -q '^install ' && fail "a plugin removed by hand came back with a new version: $(calls)"
+[ "$(cat "$state_file")" = 'true:2.1.6' ] || fail "the removal was not remembered: $(cat "$state_file")"
+grep -q 'removed' "$log" || fail "leaving a removed plugin alone was not logged: $(cat "$log")"
+config_ha_plugin=false
+reset
+setup_ha_plugin
+config_ha_plugin=true
+reset
+setup_ha_plugin
+calls | grep -qx 'install homeassistant-config@claude-homeassistant-plugins' || \
+    fail "switching the option off and on must reinstall a removed plugin: $(calls)"
+
+# 15. The CLI answers the list, then hangs: after the first cut-off the other
+# calls are skipped, so a start waits one time limit, not three (review M4).
+rm -rf "${FAKE:?}"/* "$HOME/.claude"
+touch "$FAKE/hang-after-list"
+reset
+setup_ha_plugin || fail "a CLI hanging after the list must not fail the start"
+calls | grep -q '^marketplace add ' || fail "the list did not get through, case 15 tests nothing: $(calls)"
+calls | grep -q '^install ' && fail "install was still tried after a cut-off: $(calls)"
+[ "$(grep -c 'timed out after' "$log")" = 1 ] || \
+    fail "expected exactly one cut-off, the log says: $(cat "$log")"
+[ ! -e "$state_file" ] || fail "a cut-off must not write the state file"
+rm -f "$FAKE/hang-after-list"
 
 echo "ha plugin setup: all checks passed"

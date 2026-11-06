@@ -97,9 +97,9 @@ api_get() {
     local token="$1" url="$2" out="$3"
     if [[ "$url" =~ ^https?://supervisor(/[A-Za-z0-9/_.-]*)?$ ]]; then
         printf 'header = "Authorization: Bearer %s"\n' "$token" \
-            | "$CURL" -fsS --max-time 8 --proto '=http,https' -K - -o "$out" "$url"
+            | "$CURL" -q --noproxy '*' -fsS --max-time 8 --proto '=http,https' -K - -o "$out" "$url"
     elif [[ "$url" == file://* ]]; then
-        "$CURL" -fsS --proto '=file' -o "$out" "$url"
+        "$CURL" -q -fsS --proto '=file' -o "$out" "$url"
     else
         echo "ha-statusline: refusing to send the Supervisor token to $url" >&2
         return 1

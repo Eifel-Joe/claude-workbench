@@ -213,7 +213,8 @@ program in the terminal cannot exfiltrate your clipboard.
   is never replaced; `off` only removes the app's. Add the home to your own with
   `ha-statusline --home`. `ha-statusline --preview` shows the result with
   sample data
-- The Supervisor token only goes to `http://supervisor`, never to another address
+- The Supervisor token only goes to `http://supervisor`, never to another
+  address, a proxy or through your `.curlrc`
 - While the app offers to take over data from an older app, or when the app
   options cannot be read at start, the status line is left as it is until the
   next start
@@ -229,7 +230,8 @@ program in the terminal cannot exfiltrate your clipboard.
   writes or edits ("Checking Home Assistant YAML"), and gets `/ha-check`,
   `/ha-upgrade` and `/ha-find-duplicates`
 - `false` disables the plugin, `true` enables it again. `/plugin` in Claude can
-  turn it off too; an app update with a newer plugin keeps that
+  turn it off or remove it too; an app update with a newer plugin keeps that
+  (switch the option off and on to get a removed plugin back)
 - New plugin versions arrive with app updates
 - While the app offers to take over data from an older app, or when the app
   options cannot be read at start, the plugin is left as it is until the next

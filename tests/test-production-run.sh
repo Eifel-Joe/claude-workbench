@@ -155,7 +155,7 @@ APP_MIGRATION_CLI="/opt/scripts/app-migration/cli.js"
 [ "$(with_migration_dialog 'clear && picker')" = 'clear && picker' ] || \
     fail "launch command must stay unchanged without a migration offer"
 printf '{}\n' > "$APP_MIGRATION_OFFER"
-[ "$(with_migration_dialog 'clear && picker')" = "node $APP_MIGRATION_CLI dialog; clear && picker" ] || \
+[ "$(with_migration_dialog 'clear && picker')" = "/usr/bin/node $APP_MIGRATION_CLI dialog; clear && picker" ] || \
     fail "a pending migration offer must show the dialog before the launch command"
 
 # Detection output: "WARNING:" lines become log warnings (prefix stripped).

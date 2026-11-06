@@ -212,7 +212,18 @@ grep -q 'Authorization: Bearer test-token' "$tmp_dir/curl-stdin" || \
     fail "the token did not reach curl on stdin: $(cat "$tmp_dir/curl-stdin" 2>/dev/null)"
 grep -qE '(^| )(-L|--location)( |$)' "$tmp_dir/curl-args" && fail "curl follows redirects: $(cat "$tmp_dir/curl-args")"
 [ ! -e "$tmp_dir/path-curl-called" ] || fail "a curl planted on PATH received the Supervisor request"
+# No curlrc of the user (-q, first) and no proxy from the session's
+# environment: either could send the token elsewhere (review M5).
+while IFS= read -r args; do
+    [[ "$args" == "-q "* ]] || fail "curl does not get -q as its first argument: $args"
+    [[ "$args" == *"--noproxy *"* ]] || fail "curl may use a proxy for the Supervisor: $args"
+done < "$tmp_dir/curl-args"
 grep -q "http://supervisor/core/api/states" "$tmp_dir/curl-args" || fail "states were not requested: $(cat "$tmp_dir/curl-args")"
+rm -f "$tmp_dir/curl-args"
+rm -rf "$HA_STATUSLINE_CACHE_DIR"
+HA_STATUSLINE_CURL="$tmp_dir/fakebin/curl" "$script" --refresh 2>/dev/null || true
+[[ "$(head -n 1 "$tmp_dir/curl-args")" == "-q "* ]] || \
+    fail "curl for file:// does not get -q first: $(head -n 1 "$tmp_dir/curl-args")"
 # The default is the image's curl, by absolute path.
 grep -qF 'CURL="${HA_STATUSLINE_CURL:-/usr/bin/curl}"' "$script" || \
     fail "the script must default to /usr/bin/curl, not curl from PATH"

@@ -18,8 +18,9 @@
   to leave entities out, `off` to remove it. A status line you set yourself with
   `/statusline` is never replaced; add the home to it with `ha-statusline --home`.
 - **The Supervisor token stays with the Supervisor:** it only goes to
-  `http://supervisor`, on curl's stdin, and the app calls the image's curl by
-  its full path, so a `curl` in `/data/packages/bin` never gets it.
+  `http://supervisor`, on curl's stdin, without your `.curlrc` or a proxy from
+  the environment, and the app calls the image's curl by its full path, so a
+  `curl` in `/data/packages/bin` never gets it.
 - Thanks to **ESJavadex** for the status line (ESJavadex/claude-code-ha
   `ae4f88ec`, `dde63c98`, `7b558af0`, `6422e800`), to **susomejias** for the
   style it is based on (susomejias/claude-statusline, MIT) and to **Neil
@@ -33,14 +34,16 @@
   Home Assistant YAML") and gets `/ha-check`, `/ha-upgrade` and
   `/ha-find-duplicates`.
 - **New option `home_assistant_plugin`** (on by default): off disables the
-  plugin, on enables it again. If you turn it off with `/plugin`, an app update
-  with a newer plugin keeps it off.
+  plugin, on enables it again. If you turn it off or remove it with `/plugin`,
+  an app update with a newer plugin keeps it that way (switch the option off and
+  on to get a removed plugin back).
 - Thanks to **ESJavadex** for the plugin
   ([claude-homeassistant-plugins](https://github.com/ESJavadex/claude-homeassistant-plugins),
   MIT) and for bundling it (ESJavadex/claude-code-ha `42c53d48`). Our own:
   the plugin is pinned to its release commit, a failed install or update is
-  tried again on the next start, and nothing is changed while the options
-  cannot be read.
+  tried again on the next start, a hanging Claude CLI costs one time limit
+  and is not called at all on a CPU it cannot run on, and nothing is changed
+  while the options cannot be read.
 - Status line and plugin leave `~/.claude` alone while the app offers to take
   over data from an older app, so your old `settings.json` comes across; they
   are set up on the next start.
@@ -50,7 +53,8 @@
   panel or the option reads.** The start and the app's services (the panel's
   Node.js service, ttyd, tmux) now find the system's programs first and your
   persistent ones after them. In the terminal - Claude, the session picker, new
-  windows - your persistent programs still come first.
+  windows - your persistent programs still come first; the takeover window
+  there now runs the image's `node` by its full path.
 - Thanks to **unsnow-iac** for the idea (commits `08686e1e`, `83c6997e`, found
   in miczu71's fork, branch `history/unsnow-full`); here ttyd and tmux keep the
   system order too.

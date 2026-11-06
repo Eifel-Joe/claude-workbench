@@ -113,4 +113,13 @@ bash "$TMUX_WRAPPER_PATH" || fail "the tmux wrapper failed"
 grep '^args|new-session' "$tmp_dir/tmux.log" | grep -qF -- "-e $expected_session -s claude" || \
     fail "the tmux wrapper creates the session without -e $expected_session: $(grep '^args|' "$tmp_dir/tmux.log")"
 
+# 5. The takeover dialog is the app's own program, but runs in the session,
+# where the persistent folders come first: it calls the image's node by its
+# full path (review M6).
+offer="$tmp_dir/offer.json"
+printf '{}\n' > "$offer"
+dialog=$(APP_MIGRATION_OFFER="$offer" APP_MIGRATION_CLI=/opt/x/cli.js with_migration_dialog 'clear')
+[ "$dialog" = "/usr/bin/node /opt/x/cli.js dialog; clear" ] || \
+    fail "the takeover dialog does not run the image's node: $dialog"
+
 echo "Command path suite passed"
