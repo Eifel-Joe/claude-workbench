@@ -87,6 +87,14 @@ case "$preview" in
     *"Opus 5.5"*) ;;
     *) fail "ha-statusline --preview shows no model: $preview" ;;
 esac
+# n30: the package name rules judged by the image's bash on musl (the unit
+# tests run them with glibc): taken from /run.sh as written there.
+names_check=$(docker run --rm --entrypoint /bin/bash "$image" -c 'eval "$(grep -E "^(APK_NAME_RE|PIP_SPEC_RE)=" /run.sh)"
+    for n in git git=2.47.0-r0 cmd:ping; do [[ $n =~ $APK_NAME_RE ]] || echo "apk rejects $n"; done
+    for n in --ha-cli -p "git vim"; do [[ $n =~ $APK_NAME_RE ]] && echo "apk accepts $n"; done
+    for n in "pandas[all]" requests==2.31.0 "foo>=1,<2"; do [[ $n =~ $PIP_SPEC_RE ]] || echo "pip rejects $n"; done
+    for n in "-r x" --index-url=x; do [[ $n =~ $PIP_SPEC_RE ]] && echo "pip accepts $n"; done; true' 2>&1)
+[ -z "$names_check" ] || fail "package name rules on musl: $names_check"
 echo "Image: Alpine $release, Python $python, Node $node_major, $tmux_version, musl $musl, claude $claude_out, HA plugin $plugin_version"
 
 # --- 2. /data as Alpine 3.21 left it -----------------------------------------

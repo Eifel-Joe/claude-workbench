@@ -217,9 +217,11 @@ program in the terminal cannot exfiltrate your clipboard.
   sample data
 - The Supervisor token only goes to `http://supervisor`, never to another
   address, a proxy or through your `.curlrc`
-- While the app offers to take over data from an older app, or when the app
-  options cannot be read at start, the status line is left as it is until the
-  next start
+- While the app offers to take over data from an older app, while its check
+  for an older app could not finish, or when the app options cannot be read at
+  start, the status line is left as it is until the next start. If that check
+  keeps failing, the status line appears once you are signed in to Claude and
+  the app has restarted
 - Thanks to ESJavadex (the status line), susomejias/claude-statusline (the
   style) and Neil Sleightholm (icon spacing)
 
@@ -235,9 +237,11 @@ program in the terminal cannot exfiltrate your clipboard.
   turn it off or remove it too; an app update with a newer plugin keeps that
   (switch the option off and on to get a removed plugin back)
 - New plugin versions arrive with app updates
-- While the app offers to take over data from an older app, or when the app
-  options cannot be read at start, the plugin is left as it is until the next
-  start
+- While the app offers to take over data from an older app, while its check
+  for an older app could not finish, or when the app options cannot be read at
+  start, the plugin is left as it is until the next start. If that check keeps
+  failing, the plugin arrives once you are signed in to Claude and the app has
+  restarted
 
 **Example Configuration**:
 ```yaml

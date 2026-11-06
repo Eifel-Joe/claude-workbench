@@ -223,10 +223,16 @@ refresh() {
         elif [ "$wait" != true ]; then
             return 0
         else
-            # 5 checks a second; a counter, not $SECONDS, so the limit holds
-            # however long one check takes.
+            # 5 checks a second; a counter, because $SECONDS only counts whole
+            # seconds. A lock that turns stale meanwhile (a killed refresh) is
+            # taken over like above instead of waiting out the limit.
             tries=$(( REFRESH_WAIT * 5 ))
             until mkdir "$LOCK" 2>/dev/null; do
+                # Only when it could be removed: else this would spin without
+                # counting down.
+                if [ "$(file_age "$LOCK")" -gt 60 ] && rmdir "$LOCK" 2>/dev/null; then
+                    continue
+                fi
                 if [ "$tries" -le 0 ]; then
                     echo "ha-statusline: another refresh is still running, try again shortly" >&2
                     return 1

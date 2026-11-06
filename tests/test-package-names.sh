@@ -134,7 +134,18 @@ apk|-x foo|0
 apk|git vim|0
 apk|-|0
 apk|pandas[all]|0
+apk|foo<2|1
+apk|foo>1|1
+apk|foo~1.2|1
+apk|foo!|0
+apk|foo,bar|0
+apk|föo|0
+apk|foo	bar|0
 pip|pandas[all]|1
+pip|foo!=1.0|1
+pip|foo~=1.2|1
+pip|cmd:ping|0
+pip|foo@x|0
 pip|requests==2.31.0|1
 pip|foo>=1,<2|1
 pip|a|1

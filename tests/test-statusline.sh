@@ -203,6 +203,15 @@ started=$SECONDS
 [ ! -e "$states" ] || fail "--refresh-background refreshed although another refresh ran"
 rmdir "$lock"
 
+# A lock left by a killed refresh turns stale (60 s) while --refresh waits:
+# it takes the lock over then instead of giving up (review).
+mkdir "$lock"
+touch -d '58 seconds ago' "$lock"
+started=$SECONDS
+HA_STATUSLINE_REFRESH_WAIT=15 "$script" --refresh || fail "--refresh gave up on a lock that turned stale while it waited"
+[ -s "$states" ] || fail "--refresh did not refresh after taking over a stale lock"
+[ $((SECONDS - started)) -lt 12 ] || fail "--refresh waited for the whole limit although the lock went stale"
+
 # The status line starts the background form: with a busy lock that is freed
 # right away, nothing may wait and refresh after it (default layout = home).
 printf '[]\n' > "$states"

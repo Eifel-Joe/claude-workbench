@@ -18,7 +18,13 @@ async function runDetect() {
     const r = await detect(createClient({ timeoutMs: DETECT_TIMEOUT_MS }), p);
     // Decided (n33): from here an offer file alone says whether a takeover can
     // still come, so the status line and the plugin may write to ~/.claude.
-    fs.rmSync(p.undecided, { force: true });
+    // Its own try: a failure here must not reach the catch below, which
+    // deletes the offer just written.
+    try {
+      fs.rmSync(p.undecided, { force: true });
+    } catch (e) {
+      console.log(`WARNING: App migration: could not remove ${p.undecided} (${e.message})`);
+    }
     console.log(r.offered
       ? `App migration: offering data from ${r.offer.name} ${r.offer.version} (${r.offer.slug})`
       : `App migration: nothing to offer (${r.reason})`);
