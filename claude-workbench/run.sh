@@ -808,7 +808,9 @@ setup_persistent_claude() {
 # (settings.json, plugin lists, ~/.claude.json from `claude plugin`) and keep
 # the old app's files out - the takeover never replaces existing files.
 # Rejected: merging those files during the takeover (three formats that Claude
-# owns and changes). tests/test-migration-undecided.sh.
+# owns and changes). An offer that still comes after the setup (the old app
+# installed later, n40) has the old files replace ours as whole files
+# (app-migration/apply.js setAsideOwnSetup). tests/test-migration-undecided.sh.
 migration_offer_pending() {
     [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ] \
         || [ -f "${APP_MIGRATION_UNDECIDED:-/data/migration/undecided}" ]

@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.6.5
+
+### 🐛 Bug Fix - A takeover from an old app installed later keeps its Claude settings
+- **The old settings, plugins, MCP servers and project approvals stayed out**
+  when the older app was installed after Claude Workbench had already run
+  without a Claude login: the status line and the plugin had written
+  `settings.json`, the plugin lists and `~/.claude.json`, and the takeover
+  never replaces existing files.
+- **Without a login in Claude Workbench, the old files now replace these as
+  whole files** - `~/.claude.json` only if the old app has one, the settings
+  and both plugin lists together. Nothing is merged or deleted: the replaced
+  files are kept in `/data/migration/replaced/<date>/`, and the summary after
+  the takeover names the folder. The plugin and the status line set
+  themselves up on the next start as after any takeover.
+- The old files are copied first and swapped in only when every copy worked,
+  so a failed copy leaves Claude's files as they were.
+- Found in round 3.6.4. Status line and Home Assistant plugin are by
+  **ESJavadex** (ESJavadex/claude-code-ha); their code is unchanged.
+
 ## 3.6.4
 
 ### 🛠️ Improvement - Package names from the options are checked first

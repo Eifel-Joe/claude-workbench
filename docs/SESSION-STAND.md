@@ -1,5 +1,30 @@
 # Sitzungsstand
 
+## 2026-11-07 (24) — 3.6.5 Übernahme aus einer später installierten alten App (n40)
+
+### Stand
+- Spec `docs/specs/2026-11-06-round-3.6.5-design.md`, Plan `docs/plans/2026-11-06-round-3.6.5.md`,
+  Branch `fix/round-3.6.5` von `main` (`e62e4d8f`). Variante B vom User gewählt, Spec/Plan freigegeben.
+- `apply.js` `setAsideOwnSetup`: ohne eigene Claude-Daten ersetzen die alten `~/.claude.json` (nur wenn
+  vorhanden) und die Gruppe `settings.json` + beide Plugin-Listen (+ unsere Plugin-Merkdatei) unsere als
+  ganze Dateien; erst kopieren (`*.takeover`), dann tauschen; unsere nach
+  `/data/migration/replaced/<datum>/`. `paths.js` `replaced`.
+- Lokal grün: `node --test tests/test-app-migration.js` (75/75), `test-release-metadata.sh`,
+  `test-migration-undecided.sh`. unbestätigt bis CI: übrige Suiten (jq fehlt lokal), Boot-Test.
+
+### Fallen
+- Fehlt `~/.claude.json`, liegt aber `~/.claude/backups/.claude.json.backup.*`, warnt jeder
+  `claude`-Aufruf (Claude Code 2.1.119, lokal geprüft). Deshalb `.claude.json` nur 1:1 ersetzen.
+- Lokaler Claude-Test in einem leeren Home unter Windows zieht die Anmeldung aus dem Windows-Speicher in
+  die `.claude.json` (`oauthAccount`) – Test-Home danach löschen.
+
+### Nächste Schritte
+- PR-Text freigeben, PR, CI grün; danach Hauptsitzung: Merge, Release (`docs/release-notes-3.6.5.md`),
+  HA-Update, Prüfung nach „Check after the update“.
+
+### Empfohlene Skills
+- `task-loop`, `release-weg`.
+
 ## 2026-11-06 (23) — 3.6.4 Paketnamen, Übernahme, Auffrischen, späte Übernahme (n30–n33)
 
 ### Stand
