@@ -314,8 +314,8 @@ jq -e '[.[] | select(.id == "homeassistant-config@claude-homeassistant-plugins" 
 in_container "jq -e '.statusLine.command == \"/usr/local/bin/ha-statusline\" and .statusLine.refreshInterval == 30' /data/home/.claude/settings.json" \
     > /dev/null || fail "settings.json has no Home Assistant status line"
 grep -q 'Home Assistant status line enabled' <<< "$log" || fail "enabling the status line was not logged"
-# A refresh started elsewhere holds the lock and --refresh then returns at once
-# (review M7), so wait for the line instead of reading it once.
+# --refresh waits for a refresh started elsewhere (n32; until 3.6.3 it returned
+# at once, review M7). The loop below stays as a safety margin.
 in_container 'HOME=/data/home ha-statusline --refresh' || fail "ha-statusline --refresh failed against the Supervisor"
 home_line=''
 for _ in $(seq 1 15); do

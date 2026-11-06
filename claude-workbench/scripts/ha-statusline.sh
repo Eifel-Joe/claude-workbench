@@ -25,7 +25,7 @@
 #   ha-statusline              the status line (reads Claude's JSON on stdin)
 #   ha-statusline --home       only the home pieces, for your own status line
 #   ha-statusline --preview    the status line with sample Claude data
-#   ha-statusline --refresh    refresh the cache now and print any error
+#   ha-statusline --refresh    refresh the cache now (after one already running) and print any error
 #   ha-statusline --segments   the piece names
 #
 # By ESJavadex (ESJavadex/claude-code-ha@ae4f88ec, dde63c98, 7b558af0,
@@ -43,6 +43,9 @@ CACHE_DIR="${HA_STATUSLINE_CACHE_DIR:-/tmp/ha-statusline}"
 CONFIG_FILE="${HA_STATUSLINE_CONFIG:-/data/.config/ha-statusline.json}"
 TTL="${HA_STATUSLINE_TTL:-30}"
 SUPERVISOR_TTL="${HA_STATUSLINE_SUPERVISOR_TTL:-300}"
+# How long --refresh waits for a refresh already running (n32): one refresh is
+# up to four requests of at most 8 s each.
+REFRESH_WAIT="${HA_STATUSLINE_REFRESH_WAIT:-30}"
 STATES="$CACHE_DIR/states.json"
 SYSTEM="$CACHE_DIR/system.json"
 LOCK="$CACHE_DIR/refresh.lock"
@@ -203,15 +206,35 @@ refresh_system() {
     rm -f "$CACHE_DIR"/*.raw "$SYSTEM.tmp"
 }
 
+# $1: wait (true) or give up (false) while another refresh holds the lock.
+# The background refresh gives up: the one running writes the cache anyway. By
+# hand (--refresh) it waits up to REFRESH_WAIT seconds and then refreshes
+# itself (n32): giving up there returned 0 without doing anything, so a manual
+# check could show the old state. Still busy after the wait: an error.
 refresh() {
-    local token status=0
+    local wait="${1:-false}" token status=0 tries
     mkdir -p "$CACHE_DIR" && chmod 700 "$CACHE_DIR" 2>/dev/null || return 1
 
     # One refresh at a time; a lock left by a killed refresh expires
     if ! mkdir "$LOCK" 2>/dev/null; then
-        [ "$(file_age "$LOCK")" -gt 60 ] || return 0
-        rmdir "$LOCK" 2>/dev/null
-        mkdir "$LOCK" 2>/dev/null || return 0
+        if [ "$(file_age "$LOCK")" -gt 60 ]; then
+            rmdir "$LOCK" 2>/dev/null
+            mkdir "$LOCK" 2>/dev/null || return 0
+        elif [ "$wait" != true ]; then
+            return 0
+        else
+            # 5 checks a second; a counter, not $SECONDS, so the limit holds
+            # however long one check takes.
+            tries=$(( REFRESH_WAIT * 5 ))
+            until mkdir "$LOCK" 2>/dev/null; do
+                if [ "$tries" -le 0 ]; then
+                    echo "ha-statusline: another refresh is still running, try again shortly" >&2
+                    return 1
+                fi
+                tries=$(( tries - 1 ))
+                sleep 0.2
+            done
+        fi
     fi
     # shellcheck disable=SC2064
     trap "rmdir '$LOCK' 2>/dev/null" EXIT
@@ -234,9 +257,9 @@ refresh() {
 refresh_if_stale() {
     [ "$(file_age "$STATES")" -ge "$TTL" ] || return 0
     if command -v setsid >/dev/null 2>&1; then
-        setsid "$0" --refresh </dev/null >/dev/null 2>&1 &
+        setsid "$0" --refresh-background </dev/null >/dev/null 2>&1 &
     else
-        nohup "$0" --refresh </dev/null >/dev/null 2>&1 &
+        nohup "$0" --refresh-background </dev/null >/dev/null 2>&1 &
     fi
 }
 
@@ -375,7 +398,12 @@ render() {
 
 case "${1:-}" in
     --refresh)
-        refresh
+        refresh true
+        exit $?
+        ;;
+    # Started by the status line itself (refresh_if_stale); not for users.
+    --refresh-background)
+        refresh false
         exit $?
         ;;
     --segments)
