@@ -82,14 +82,23 @@ persist-install --list
 
 ### PATH Priority
 
+In the terminal (Claude, the session picker, new tmux windows, login shells):
+
 ```bash
 # Persistent packages are checked FIRST
 /data/packages/bin                    # ← persist-install packages
 /data/packages/python/venv/bin        # ← Python packages
+/data/home/.local/bin                 # Claude's native binary link
 /usr/local/bin                        # System packages
 /usr/bin
 /bin
 ```
+
+The app's own start and services (the panel's Node.js service, ttyd, tmux,
+option reads) use the opposite order since 3.6.2: the system's programs first,
+the persistent folders last. A copy of `node` or `curl` in `/data/packages/bin`
+then cannot break the panel, and a program only `persist-install` has is still
+found.
 
 ---
 

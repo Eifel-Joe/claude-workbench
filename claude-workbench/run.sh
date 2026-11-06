@@ -11,12 +11,19 @@ set -o pipefail
 STARTUP_NPM_TIMEOUT="${STARTUP_NPM_TIMEOUT:-300}"
 STARTUP_APK_TIMEOUT="${STARTUP_APK_TIMEOUT:-300}"
 STARTUP_PIP_TIMEOUT="${STARTUP_PIP_TIMEOUT:-900}"
+# One `claude plugin ...` call while setting up the Home Assistant plugin.
+STARTUP_PLUGIN_TIMEOUT="${STARTUP_PLUGIN_TIMEOUT:-60}"
 
 # Time limit for one app option read from the Supervisor, and the marker that
 # says it ran out this start (see read_option). 10 s like the app migration's
 # Supervisor check (DETECT_TIMEOUT_MS). Overridable only for the tests.
 OPTION_READ_TIMEOUT="${OPTION_READ_TIMEOUT:-10}"
 OPTION_READ_GAVE_UP="${OPTION_READ_GAVE_UP:-/tmp/.claude-workbench-options-unanswered}"
+
+# The folders persist-install fills with programs: last on PATH for run.sh and
+# the app's services, first in the terminal session (boot_path, terminal_path).
+# Overridable for tests only (tests/test-command-path.sh).
+PERSIST_PATHS="${PERSIST_PATHS:-/data/packages/bin:/data/packages/python/venv/bin:/data/home/.local/bin}"
 
 # npm's download cache; overridable for tests only (tests/test-npm-cache.sh).
 NPM_CACHE_DIR="${NPM_CACHE_DIR:-/tmp/npm-cache}"
@@ -94,6 +101,18 @@ run_with_timeout() {
 # `bash -c` it kills only bash: the orphaned curl keeps the $(...) pipe open
 # and the read still hangs), a watchdog subshell (same orphan), a curlrc
 # (applies to every curl of the environment). tests/test-option-timeout.sh.
+#
+# "null" (n21). Root cause: bashio 0.19.0 sets `default_value=${2:-null}`
+# (lib/config.sh), so an option missing from the configuration, or set to JSON
+# null, came back from `read_option x ''` as the word "null", not empty.
+# Affected were all reads with an empty default: Claude started with
+# `--remote-control null`, the package lists ran `persist-install null`.
+# Fix: "null" counts as empty here, for every option at once, instead of a
+# check in each caller (as upstream does). Accepted: an option whose value is
+# literally "null" reads as unset. Rejected: bashio::config.exists first (a
+# second Supervisor request, and the time limit above would apply twice).
+# The Supervisor normally fills in config.yaml's defaults, so this is a guard.
+# tests/test-option-null.sh.
 read_option() {
     local value=''
     local started=$SECONDS
@@ -106,6 +125,9 @@ read_option() {
             { : > "$OPTION_READ_GAVE_UP"; } 2>/dev/null || true
             bashio::log.warning "The Supervisor did not answer within ${OPTION_READ_TIMEOUT}s; the app options use their defaults for this start"
         fi
+    fi
+    if [ "$value" = null ]; then
+        value=''
     fi
     printf '%s\n' "${value:-$2}"
 }
@@ -208,8 +230,11 @@ init_environment() {
     # (which controls permission prompts, not whether Claude can launch).
     export IS_SANDBOX=1
 
-    # Setup persistent package paths (HIGHEST PRIORITY)
-    export PATH="$persist_bin:$persist_python/venv/bin:$data_home/.local/bin:$PATH"
+    # The system's programs first, the persistent folders after them (n20,
+    # boot_path); the terminal session gets them first (terminal_path).
+    local boot
+    boot=$(boot_path)
+    export PATH="$boot"
     # $persist_lib is deliberately NOT on run.sh's own LD_LIBRARY_PATH (n10):
     # the loader searches it before the system's libraries, so one broken copy
     # from persist-install took down node (the panel), ttyd and the tmux
@@ -662,16 +687,21 @@ TMUX_EOF
 
     # Wrapper: attach to existing 'claude' session, or create a fresh one that runs the launch command
     # Creates the session again once it ended; same session environment as in
-    # start_web_terminal (terminal_library_path).
-    cat > "$tmux_wrapper" << 'WRAPPER_EOF'
-#!/bin/bash
+    # start_web_terminal: the same functions, copied in (declare -f), with
+    # PERSIST_PATHS as run.sh has it. ttyd runs the wrapper with the boot PATH.
+    {
+        printf '#!/bin/bash\n'
+        printf 'PERSIST_PATHS=%q\n' "$PERSIST_PATHS"
+        declare -f terminal_library_path path_without_persist terminal_path
+        cat << 'WRAPPER_EOF'
 if tmux has-session -t claude 2>/dev/null; then
     exec tmux attach-session -t claude
 else
-    exec tmux new-session -e "LD_LIBRARY_PATH=/data/packages/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+    exec tmux new-session -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
+        -e "PATH=$(terminal_path)" -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
 fi
 WRAPPER_EOF
+    } > "$tmux_wrapper"
     chmod +x "$tmux_wrapper"
 
     bashio::log.info "tmux configured (${tmux_conf})"
@@ -685,9 +715,10 @@ setup_persistent_claude() {
     local persistent_bin="$persistent_root/bin/claude"
     local persistent_package="$persistent_root/lib/node_modules/@anthropic-ai/claude-code/package.json"
     local claude_link="${CLAUDE_BIN_LINK:-/usr/local/bin/claude}"
-    # The native binary's symlink lives in $HOME/.local/bin, which init_environment
-    # puts ahead of /usr/local/bin on PATH. Overwrite it too, or "claude" keeps
-    # resolving to the stale build-time binary even after this override activates.
+    # The native binary's symlink lives in $HOME/.local/bin, which the terminal
+    # session and login shells put ahead of /usr/local/bin on PATH (terminal_path,
+    # profile script). Overwrite it too, or "claude" typed there keeps resolving
+    # to the stale build-time binary even after this override activates.
     local native_bin_link="${CLAUDE_NATIVE_BIN_LINK:-/data/home/.local/bin/claude}"
     local claude_npm_spec="@anthropic-ai/claude-code@latest"
 
@@ -753,6 +784,306 @@ setup_persistent_claude() {
         bashio::log.warning "Persistent Claude override enabled but no working persistent Claude install found at $persistent_root"
         bashio::log.warning "Install it manually once with: NPM_CONFIG_PREFIX=/data/npm npm install -g $claude_npm_spec"
     fi
+}
+
+# An offer to take over Claude data from an older app installed alongside waits for the
+# terminal (detect_app_migration writes it, with_migration_dialog shows it).
+migration_offer_pending() {
+    [ -f "${APP_MIGRATION_OFFER:-/data/migration/offer.json}" ]
+}
+
+# Whether the Supervisor answered the option request this start. read_option
+# hands back the default on any failure, so a probe reads auto_launch_claude -
+# in every answer, because the Supervisor fills in config.yaml's defaults
+# (supervisor/apps/app.py, App.options) - with a placeholder default. A
+# successful answer is cached by bashio, so this adds no request. Rejected:
+# the placeholder on the option itself (an empty list reads as the default,
+# so `statusline: []` would look unreadable).
+options_readable() {
+    local probe
+    probe=$(read_option 'auto_launch_claude' '__unreadable__')
+    [ "$probe" != '__unreadable__' ]
+}
+
+# One `claude plugin` call for setup_ha_plugin, time-limited, quiet.
+# After one call ran into the time limit, the others of this start are skipped
+# (HA_PLUGIN_CLI_GAVE_UP): a hanging CLI costs one time limit, not three. Runs
+# in the caller's shell, so the flag survives between calls.
+ha_plugin_cli() {
+    local started=$SECONDS status=0
+    [ "${HA_PLUGIN_CLI_GAVE_UP:-false}" = false ] || return 1
+    run_with_timeout "$STARTUP_PLUGIN_TIMEOUT" "Home Assistant plugin: claude plugin $1" \
+        claude plugin "$@" < /dev/null > /dev/null 2>&1 || status=$?
+    if [ "$status" -ne 0 ] && [ $((SECONDS - started)) -ge "$STARTUP_PLUGIN_TIMEOUT" ]; then
+        HA_PLUGIN_CLI_GAVE_UP=true
+    fi
+    return "$status"
+}
+
+# The Home Assistant plugin for Claude Code (p19): homeassistant-config from
+# ESJavadex/claude-homeassistant-plugins (MIT), copied into the image at build
+# time (Dockerfile). It teaches Claude current Home Assistant syntax, checks
+# every YAML file Claude edits (PostToolUse hook) and adds /ha-check,
+# /ha-upgrade and /ha-find-duplicates. No network: the marketplace is a local
+# folder.
+#   - first start: register the marketplace, install the plugin
+#   - a newer bundled version: `claude plugin update`, never `install`, which
+#     would switch on a plugin the user turned off with /plugin
+#   - home_assistant_plugin off: disable it (not uninstall); on again: enable
+# Works only when option or bundled version changed (state file). Adapted from
+# ESJavadex (ESJavadex/claude-code-ha@42c53d48). Our changes: read_option
+# instead of `bashio::config ... || x=true` (empty under bashio 0.19.0);
+# run_with_timeout; the state file is written only after success, so a failed
+# install or update is retried on the next start; every step is guarded, the
+# function always returns 0 (set -e, inherit_errexit); nothing is written
+# while a takeover offer is open - the takeover copies the old ~/.claude
+# without replacing existing files, so a settings.json written now would hide
+# the user's old one (R1) - or when the options could not be read, so a silent
+# Supervisor cannot switch on a plugin the user turned off (R2).
+# tests/test-ha-plugin.sh, tests/ci-boot-smoke.sh.
+setup_ha_plugin() {
+    local marketplace_dir="${HA_PLUGIN_MARKETPLACE_DIR:-/opt/claude-plugins/claude-homeassistant-plugins}"
+    local marketplace="claude-homeassistant-plugins"
+    local plugin_id="homeassistant-config@${marketplace}"
+    local manifest="$marketplace_dir/homeassistant-config/.claude-plugin/plugin.json"
+    local state_file="${HA_PLUGIN_STATE:-$HOME/.claude/plugins/.claude-workbench-ha-plugin}"
+    local enabled bundled wanted previous='' installed='' list
+
+    if [ ! -f "$manifest" ]; then
+        bashio::log.info "Home Assistant plugin: not bundled in this image"
+        return 0
+    fi
+    if ! command -v claude > /dev/null 2>&1; then
+        bashio::log.warning "Home Assistant plugin: claude not found, skipping"
+        return 0
+    fi
+    # Claude hangs on a CPU without x86-64-v2 (cpu-check.sh); every call would
+    # run into the time limit, on every start. Same check as
+    # setup_persistent_claude.
+    if command -v claude_cpu_missing_flags > /dev/null 2>&1; then
+        local cpu_missing
+        cpu_missing=$(claude_cpu_missing_flags)
+        if [ -n "$cpu_missing" ]; then
+            bashio::log.warning "Home Assistant plugin: skipped, Claude Code cannot run on this CPU (missing: ${cpu_missing})"
+            return 0
+        fi
+    fi
+    if migration_offer_pending; then
+        bashio::log.info "Home Assistant plugin: a data takeover offer is open, set up on the next start"
+        return 0
+    fi
+    if ! options_readable; then
+        bashio::log.warning "Home Assistant plugin: the app options could not be read, plugin unchanged this start"
+        return 0
+    fi
+    enabled=$(read_option 'home_assistant_plugin' 'true')
+    [ "$enabled" = false ] || enabled=true
+
+    bundled=$(jq -r '.version // empty' "$manifest" 2> /dev/null) || bundled=''
+    if [ -z "$bundled" ]; then
+        bashio::log.warning "Home Assistant plugin: no version in $manifest, skipping"
+        return 0
+    fi
+    wanted="${enabled}:${bundled}"
+    if [ -f "$state_file" ]; then
+        previous=$(cat "$state_file" 2> /dev/null) || previous=''
+    fi
+    if [ "$previous" = "$wanted" ]; then
+        bashio::log.info "Home Assistant plugin: ${bundled}, home_assistant_plugin=${enabled}, nothing to do"
+        return 0
+    fi
+
+    if ! list=$(run_with_timeout "$STARTUP_PLUGIN_TIMEOUT" "Home Assistant plugin: claude plugin list" \
+            claude plugin list --json < /dev/null 2> /dev/null); then
+        bashio::log.warning "Home Assistant plugin: could not list Claude's plugins, will retry on next start"
+        return 0
+    fi
+    # Only an array is understood. Anything else would read as "not
+    # installed", and install switches a plugin back on that the user turned
+    # off; so nothing is done and the next start checks again.
+    if ! installed=$(jq -er --arg id "$plugin_id" \
+            'if type == "array" then (first(.[] | select(.id == $id) | .version) // "") else error end' \
+            <<< "$list" 2> /dev/null); then
+        bashio::log.warning "Home Assistant plugin: unexpected answer from claude plugin list, plugin unchanged this start"
+        return 0
+    fi
+
+    HA_PLUGIN_CLI_GAVE_UP=false
+    if [ "$enabled" = true ]; then
+        if [ -z "$installed" ] && [ "${previous%%:*}" = true ]; then
+            # We installed it before and it is gone: the user removed it with
+            # /plugin. A newer bundled version must not bring it back; the
+            # option off and on again reinstalls it.
+            bashio::log.info "Home Assistant plugin: removed by hand, leaving it out (switch home_assistant_plugin off and on to reinstall)"
+            if ! { mkdir -p "${state_file%/*}" && printf '%s\n' "$wanted" > "$state_file"; } 2> /dev/null; then
+                bashio::log.warning "Home Assistant plugin: could not write ${state_file}"
+            fi
+            return 0
+        fi
+        ha_plugin_cli marketplace add "$marketplace_dir" || true
+        if [ -z "$installed" ]; then
+            if ! ha_plugin_cli install "$plugin_id"; then
+                bashio::log.warning "Home Assistant plugin: install failed, will retry on next start"
+                return 0
+            fi
+            bashio::log.info "Home Assistant plugin: installed ${bundled} (turn off with the home_assistant_plugin option or /plugin)"
+        else
+            if [ "$installed" != "$bundled" ]; then
+                ha_plugin_cli marketplace update "$marketplace" || true
+                if ! ha_plugin_cli update "$plugin_id"; then
+                    bashio::log.warning "Home Assistant plugin: update failed, keeping ${installed}; will retry on next start"
+                    return 0
+                fi
+                bashio::log.info "Home Assistant plugin: updated ${installed} -> ${bundled}"
+            fi
+            # Switched back on through the option. enable fails on a plugin that
+            # is already on (already_in_goal_state), which is fine.
+            if [ "${previous%%:*}" = false ]; then
+                ha_plugin_cli enable "$plugin_id" || true
+                bashio::log.info "Home Assistant plugin: enabled by the home_assistant_plugin option"
+            fi
+        fi
+    elif [ -n "$installed" ]; then
+        ha_plugin_cli disable "$plugin_id" || true
+        bashio::log.info "Home Assistant plugin: disabled by the home_assistant_plugin option"
+    fi
+
+    if ! { mkdir -p "${state_file%/*}" && printf '%s\n' "$wanted" > "$state_file"; } 2> /dev/null; then
+        bashio::log.warning "Home Assistant plugin: could not write ${state_file}; the next start checks the plugin again"
+    fi
+    return 0
+}
+
+# The Home Assistant status line under Claude's prompt (p18;
+# scripts/ha-statusline.sh). The statusline option is a list of pieces in
+# display order: a piece name (ha-statusline --segments), --- for a new line,
+# an entity as sensor.x or Label=sensor.x; -sensor.car_* leaves entities out
+# of the home pieces. Empty means the default layout, off turns it off.
+# The script is always installed, so a status line of the user's own can show
+# the home with `ha-statusline --home`. ~/.claude/settings.json only gets our
+# statusLine when it has none or already has ours: one made with /statusline
+# or by hand is never replaced, and off only removes ours.
+# By ESJavadex (ESJavadex/claude-code-ha@ae4f88ec, dde63c98; 7b558af0: the
+# user's command is never logged, it may carry a token). Our changes:
+# read_option in its own assignment (as an argument a failed read vanished);
+# every step guarded, the function always returns 0 (set -e, inherit_errexit:
+# an unguarded mktemp or jq would have ended the start before ttyd); nothing
+# but the script is written while a takeover offer is open (R1) or the options
+# cannot be read (R2), see setup_ha_plugin. tests/test-statusline.sh.
+setup_statusline() {
+    local script_source="${HA_STATUSLINE_SOURCE:-/opt/scripts/ha-statusline.sh}"
+    local script_bin="${HA_STATUSLINE_BIN:-/usr/local/bin/ha-statusline}"
+    local config_file="${HA_STATUSLINE_CONFIG:-/data/.config/ha-statusline.json}"
+    local settings_file="${CLAUDE_SETTINGS_FILE:-$HOME/.claude/settings.json}"
+    local raw='' items='' item label entity_id segments='' current tmp next enabled=true
+    local layout='[]' exclude='[]'
+
+    if [ -f "$script_source" ]; then
+        if ! { cp "$script_source" "$script_bin" && chmod 755 "$script_bin"; } 2> /dev/null; then
+            bashio::log.warning "Status line: could not install $script_bin"
+            return 0
+        fi
+    fi
+    if migration_offer_pending; then
+        bashio::log.info "Status line: a data takeover offer is open, set up on the next start"
+        return 0
+    fi
+    if ! options_readable; then
+        bashio::log.warning "Status line: the app options could not be read, status line unchanged this start"
+        return 0
+    fi
+
+    segments=$("$script_bin" --segments 2> /dev/null | tr '\n' ' ') || segments=''
+    segments=" $segments "
+    raw=$(read_option 'statusline' '')
+    items=$(normalize_config_list "$raw") || items=''
+    while IFS= read -r item; do
+        item="${item#"${item%%[![:space:]]*}"}"
+        item="${item%"${item##*[![:space:]]}"}"
+        [ -n "$item" ] || continue
+        if [ "$item" = 'off' ]; then
+            enabled=false
+        elif [ "$item" = '---' ] || [[ "$segments" == *" $item "* ]]; then
+            if next=$(jq -c --arg s "$item" '. + [{s: $s}]' <<< "$layout"); then
+                layout="$next"
+            fi
+        elif [[ "$item" == -* ]]; then
+            item="${item//[[:space:]]/}"
+            if [[ ! "$item" =~ ^-[a-z0-9_*]+\.[a-z0-9_*]+$ ]]; then
+                bashio::log.warning "  Status line: skipping '$item' (to leave entities out, write -sensor.car_battery or -sensor.car_*)"
+                continue
+            fi
+            if next=$(jq -c --arg p "${item#-}" '. + [$p]' <<< "$exclude"); then
+                exclude="$next"
+            fi
+        else
+            if [[ "$item" == *=* ]]; then
+                label="${item%%=*}"
+                entity_id="${item#*=}"
+            else
+                label=''
+                entity_id="$item"
+            fi
+            entity_id="${entity_id//[[:space:]]/}"
+            if [[ ! "$entity_id" =~ ^[a-z0-9_]+\.[a-z0-9_]+$ ]]; then
+                bashio::log.warning "  Status line: skipping '$item' (not a piece name or an entity ID like sensor.living_room_co2)"
+                continue
+            fi
+            if next=$(jq -c --arg id "$entity_id" --arg label "$label" \
+                    '. + [{s: "entity", id: $id, label: ($label | gsub("^\\s+|\\s+$"; "") | .[0:16])}]' <<< "$layout"); then
+                layout="$next"
+            fi
+        fi
+    done <<< "$items"
+
+    # No pieces (only exclusions, or only invalid items) means the default layout
+    if ! { mkdir -p "${config_file%/*}" \
+            && jq -n --argjson l "$layout" --argjson x "$exclude" \
+                '{layout: (if ($l | length) > 0 then $l else null end), exclude: $x}' > "$config_file"; } 2> /dev/null; then
+        bashio::log.warning "Status line: could not write $config_file"
+    fi
+
+    if ! mkdir -p "${settings_file%/*}" 2> /dev/null; then
+        bashio::log.warning "Status line: could not create ${settings_file%/*}"
+        return 0
+    fi
+    if [ ! -s "$settings_file" ]; then
+        [ "$enabled" = true ] || return 0
+        if ! { printf '{}\n' > "$settings_file"; } 2> /dev/null; then
+            bashio::log.warning "Status line: could not write $settings_file"
+            return 0
+        fi
+    fi
+    if ! current=$(jq -r '.statusLine.command // empty' "$settings_file" 2> /dev/null); then
+        bashio::log.warning "Status line: $settings_file is not valid JSON, leaving it alone"
+        return 0
+    fi
+    if ! tmp=$(mktemp "$settings_file.XXXXXX" 2> /dev/null); then
+        bashio::log.warning "Status line: could not write next to $settings_file"
+        return 0
+    fi
+    if [ "$enabled" != true ]; then
+        if [ "$current" = "$script_bin" ]; then
+            if jq 'del(.statusLine)' "$settings_file" > "$tmp" 2> /dev/null && mv -f "$tmp" "$settings_file"; then
+                bashio::log.info "Home Assistant status line turned off"
+            else
+                bashio::log.warning "Status line: could not update $settings_file"
+            fi
+        fi
+    elif [ -z "$current" ] || [ "$current" = "$script_bin" ]; then
+        if jq --arg cmd "$script_bin" \
+                '.statusLine = {type: "command", command: $cmd, padding: 0, refreshInterval: 30}' \
+                "$settings_file" > "$tmp" 2> /dev/null && mv -f "$tmp" "$settings_file"; then
+            bashio::log.info "Home Assistant status line enabled"
+        else
+            bashio::log.warning "Status line: could not update $settings_file"
+        fi
+    else
+        # Not the command itself: it may carry a token in its arguments
+        bashio::log.info "Status line: keeping your own. Add the home to it with: ha-statusline --home"
+    fi
+    rm -f "$tmp"
+    return 0
 }
 
 # Setup session picker script
@@ -1114,12 +1445,15 @@ detect_app_migration() {
 }
 
 # Prefixes the launch command with the selection window while an offer exists.
+# The window runs in the terminal session, where persist-install's folders come
+# first on PATH (terminal_path), so it calls the image's node by its full path,
+# like /usr/local/bin/claude in the launch command (n20).
 with_migration_dialog() {
     local launch_command="$1"
     local offer="${APP_MIGRATION_OFFER:-/data/migration/offer.json}"
     local cli="${APP_MIGRATION_CLI:-/opt/scripts/app-migration/cli.js}"
     if [ -f "$offer" ]; then
-        printf 'node %s dialog; %s\n' "$cli" "$launch_command"
+        printf '/usr/bin/node %s dialog; %s\n' "$cli" "$launch_command"
     else
         printf '%s\n' "$launch_command"
     fi
@@ -1139,6 +1473,53 @@ with_migration_dialog() {
 # tests/test-library-path.sh, tests/ci-boot-smoke.sh.
 terminal_library_path() {
     printf '%s\n' "/data/packages/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
+# PATH order (n20). Root cause: init_environment put PERSIST_PATHS first on
+# run.sh's own PATH, so every program run.sh and its services start by name -
+# bashio's curl and jq, node for the panel, npm, apk, python3, tmux, ttyd,
+# claude - would run a same-named copy from /data/packages/bin (writable,
+# survives restarts) instead of the image's. Fix: run.sh and its services run
+# with boot_path (the system first, the persistent folders after it, so a
+# program only persist-install has is still found); the tmux session 'claude'
+# gets terminal_path (the persistent folders first) in its session
+# environment, from both places that create it, like terminal_library_path.
+# Login shells keep them first through the profile script. Idea from
+# unsnow-iac (08686e1e, 83c6997e: one PERSIST_PATHS, no duplicate entries;
+# miczu71's fork, branch history/unsnow-full), who put them first again before
+# exec ttyd; here ttyd and the tmux server stay on the boot PATH.
+# Both functions are copied into the tmux-claude wrapper (setup_tmux).
+# tests/test-command-path.sh, tests/ci-boot-smoke.sh.
+path_without_persist() {
+    local entry rest='' p skip
+    local -a persist_dirs path_parts
+    IFS=: read -ra persist_dirs <<< "$PERSIST_PATHS"
+    IFS=: read -ra path_parts <<< "$PATH"
+    for entry in "${path_parts[@]}"; do
+        [ -n "$entry" ] || continue
+        skip=false
+        for p in "${persist_dirs[@]}"; do
+            if [ "$entry" = "$p" ]; then
+                skip=true
+            fi
+        done
+        if [ "$skip" = false ]; then
+            rest="${rest:+$rest:}$entry"
+        fi
+    done
+    printf '%s\n' "$rest"
+}
+
+boot_path() {
+    local rest
+    rest=$(path_without_persist)
+    printf '%s\n' "${rest:+$rest:}$PERSIST_PATHS"
+}
+
+terminal_path() {
+    local rest
+    rest=$(path_without_persist)
+    printf '%s\n' "$PERSIST_PATHS${rest:+:$rest}"
 }
 
 # Start main web terminal
@@ -1167,7 +1548,7 @@ start_web_terminal() {
     if ! tmux has-session -t claude 2>/dev/null; then
         bashio::log.info "Creating persistent tmux session 'claude'..."
         tmux new-session -d -e "LD_LIBRARY_PATH=$(terminal_library_path)" \
-            -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
+            -e "PATH=$(terminal_path)" -s claude bash -c 'eval "$CLAUDE_LAUNCH_CMD"'
     else
         bashio::log.info "Reusing existing tmux session 'claude'..."
     fi
@@ -1231,6 +1612,10 @@ main() {
     setup_persistent_packages
     check_persisted_alpine_release
     detect_app_migration
+    # After detect_app_migration: they leave ~/.claude alone while a takeover
+    # offer is open (R1).
+    setup_ha_plugin
+    setup_statusline
     start_web_terminal
 }
 

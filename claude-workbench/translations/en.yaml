@@ -32,3 +32,9 @@ configuration:
   auto_continue:
     name: "Auto-continue after a usage limit"
     description: "When Claude reports a usage limit, types “continue” into the Claude session one minute after the reset. Claude then works on unattended, also with “Run without asking”. Switch it at runtime with the ⏩ button or `auto-continue on|off`; after a restart this setting applies again."
+  home_assistant_plugin:
+    name: "Home Assistant plugin for Claude"
+    description: "Installs the bundled homeassistant-config plugin by ESJavadex: Claude learns current Home Assistant syntax, checks every YAML file it edits and gets /ha-check, /ha-upgrade and /ha-find-duplicates. Off disables it; /plugin can also turn it off, and an app update keeps that."
+  statusline:
+    name: "Status line"
+    description: "The bar under Claude's prompt, one piece per entry in display order. Claude: model, context, folder, duration, lines, usage, tokens. Home: alerts, repairs, automations, backup, disk, core, updates, unavailable, battery, people, weather. Add an entity as sensor.x or CO2=sensor.x, --- for a new line, -sensor.car_* to leave entities out of the home pieces. Empty: the default layout; off removes it. A status line you made with /statusline is never replaced."

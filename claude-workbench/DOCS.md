@@ -142,6 +142,7 @@ program in the terminal cannot exfiltrate your clipboard.
 ### Persistent Packages
 - Configure APK and pip packages to auto-install on startup
 - Packages are stored in `/data/packages` and survive restarts
+- In the terminal (Claude, the session picker, new tmux windows) your persistent programs come first on `PATH`. The app's own start and services (the panel, ttyd, tmux, option reads) use the system's programs first, so a copy of e.g. `node` or `curl` in `/data/packages/bin` cannot break them
 - When an update moves the app to a new Alpine release (3.6.0: Alpine 3.24, Python 3.14), the first start rebuilds the Python environment and reinstalls your Python packages (this needs the network; anything that fails is retried on the next start). Old copies of system libraries are moved to `/data/packages/stale-alpine-<old release>`, and the log names system packages to reinstall with `persist-install`. Details: `PERSISTENT_PACKAGES.md`, "After an update to a new Alpine release"
 - The app's own Claude Code commands (`/install`, `/install-python`, `/list-packages`) and its persistent-package skill are refreshed in `~/.claude` on every start; save your own variants under a different name
 
@@ -177,6 +178,65 @@ program in the terminal cannot exfiltrate your clipboard.
 - Claude then works on unattended - with `dangerously_skip_permissions` it
   also runs commands without asking
 
+### Home Assistant Status Line
+- **Default**: `statusline: []` (on, default layout)
+- Two short lines under Claude's input:
+  ```
+  Opus 5.5 │ ✍️  63% │ config (main*) │ 5h 62% │ 7d 19% ⟳ Fri 09:00
+  🏠 🚨 Kitchen smoke │ 💾 9d │ 🔋 Door sensor          (or just 🏠 ✓)
+  ```
+  Line 1: model, context left, folder (git branch, `*` with changes), plan
+  limits (or the cost with an API key). Line 2: what in your home needs a look -
+  smoke/gas/CO/water/safety alerts, Supervisor repairs, broken automations, a
+  backup older than two days, a disk over 80 %, a new Home Assistant version,
+  pending updates, batteries under 20 %
+- Each piece only shows when it has something to say
+- Home Assistant is read in the background at most every 30 seconds (the
+  Supervisor's backups, disk and repairs every 5 minutes); drawing the line never
+  waits for it
+- Pick your own pieces, in display order: `model context folder duration lines
+  usage tokens` (Claude), `alerts repairs automations backup disk core updates
+  unavailable battery people weather` (home), an entity as `sensor.x` or
+  `CO2=sensor.x`, `---` for a new line, `-sensor.car_*` to leave entities out of
+  the home pieces. `off` removes the status line
+  ```yaml
+  statusline:
+    - model
+    - context
+    - ---
+    - alerts
+    - battery
+    - CO2=sensor.living_room_co2
+    - -sensor.car_*
+  ```
+- A status line you set yourself (`/statusline` or in `~/.claude/settings.json`)
+  is never replaced; `off` only removes the app's. Add the home to your own with
+  `ha-statusline --home`. `ha-statusline --preview` shows the result with
+  sample data
+- The Supervisor token only goes to `http://supervisor`, never to another
+  address, a proxy or through your `.curlrc`
+- While the app offers to take over data from an older app, or when the app
+  options cannot be read at start, the status line is left as it is until the
+  next start
+- Thanks to ESJavadex (the status line), susomejias/claude-statusline (the
+  style) and Neil Sleightholm (icon spacing)
+
+### Home Assistant Plugin for Claude
+- **Default**: `home_assistant_plugin: true`
+- The app ships the plugin `homeassistant-config` 2.1.4 by ESJavadex
+  ([claude-homeassistant-plugins](https://github.com/ESJavadex/claude-homeassistant-plugins),
+  MIT) and installs it on the first start, from the image, without the network
+- Claude then knows current Home Assistant syntax, checks every YAML file it
+  writes or edits ("Checking Home Assistant YAML"), and gets `/ha-check`,
+  `/ha-upgrade` and `/ha-find-duplicates`
+- `false` disables the plugin, `true` enables it again. `/plugin` in Claude can
+  turn it off or remove it too; an app update with a newer plugin keeps that
+  (switch the option off and on to get a removed plugin back)
+- New plugin versions arrive with app updates
+- While the app offers to take over data from an older app, or when the app
+  options cannot be read at start, the plugin is left as it is until the next
+  start
+
 **Example Configuration**:
 ```yaml
 auto_launch_claude: false
@@ -193,6 +253,8 @@ use_persistent_claude: true
 auto_update_claude_on_start: true
 image_retention_days: 30
 auto_continue: false
+home_assistant_plugin: true
+statusline: []
 ```
 
 Your OAuth credentials are stored in the app's private `/data` (under `/data/home/.claude`), not in `/config`, and persist across app updates and restarts, so you won't need to log in again. Credentials an older release left in `/config/claude-config` are copied into `/data` once on start; you can delete that folder afterwards.

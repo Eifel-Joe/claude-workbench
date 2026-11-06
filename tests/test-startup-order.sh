@@ -65,6 +65,26 @@ done
 [ "$(line_of migrate_python_venv)" -lt "$(line_of setup_persistent_packages)" ] || \
     fail "the venv must be rebuilt before the options' pip packages are installed"
 
+# The Home Assistant plugin writes to ~/.claude. The takeover from Claude
+# Terminal Pro copies the old ~/.claude without replacing existing files, so
+# the plugin step must know whether an offer is open (detect_app_migration),
+# and it runs `claude`, which setup_persistent_claude may replace (p19, R1).
+[ -n "$(line_of setup_ha_plugin)" ] || fail "main() does not call setup_ha_plugin"
+[ -n "$(line_of detect_app_migration)" ] || fail "main() does not call detect_app_migration"
+[ "$(line_of detect_app_migration)" -lt "$(line_of setup_ha_plugin)" ] || \
+    fail "setup_ha_plugin must run after detect_app_migration"
+[ "$(line_of setup_persistent_claude)" -lt "$(line_of setup_ha_plugin)" ] || \
+    fail "setup_ha_plugin must run after setup_persistent_claude"
+[ "$(line_of setup_ha_plugin)" -lt "$(line_of start_web_terminal)" ] || \
+    fail "setup_ha_plugin must run before start_web_terminal (exec)"
+# The status line writes ~/.claude/settings.json too (R1), after the plugin,
+# whose install also writes there.
+[ -n "$(line_of setup_statusline)" ] || fail "main() does not call setup_statusline"
+[ "$(line_of setup_ha_plugin)" -lt "$(line_of setup_statusline)" ] || \
+    fail "setup_statusline must run after setup_ha_plugin (and so after detect_app_migration)"
+[ "$(line_of setup_statusline)" -lt "$(line_of start_web_terminal)" ] || \
+    fail "setup_statusline must run before start_web_terminal (exec)"
+
 # grep without -q: an early exit would SIGPIPE sed, and under pipefail a
 # found line would read as "not there".
 if sed -n '/^start_web_terminal() {/,/^}/p' "$run_sh" | grep 'start_image_service' > /dev/null; then
