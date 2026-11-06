@@ -25,7 +25,8 @@ function tar(args, cwd) {
 // app's /data. Returns the path of backup.tar.
 // opts.omit: paths relative to data/ deleted before archiving; opts.mtime: Date
 // set on the memory file heating.md before archiving.
-function buildBackupFixture(dir, slug = OLD_SLUG, { omit = [], mtime } = {}) {
+// opts.extra: { 'path/relative/to/data': content } written before archiving.
+function buildBackupFixture(dir, slug = OLD_SLUG, { omit = [], mtime, extra = {} } = {}) {
   const app = path.join(dir, 'app');
   const data = path.join(app, 'data');
   writeFile(path.join(app, 'addon.json'), '{}');
@@ -41,6 +42,7 @@ function buildBackupFixture(dir, slug = OLD_SLUG, { omit = [], mtime } = {}) {
   writeFile(path.join(data, 'packages/python/venv/lib/python3.12/site-packages/requests-2.32.0.dist-info/REQUESTED'), '');
   writeFile(path.join(data, 'packages/python/venv/lib/python3.12/site-packages/idna-3.7.dist-info/METADATA'), '');
   writeFile(path.join(data, 'packages/python/venv/lib/python3.12/site-packages/pip-24.0.dist-info/METADATA'), '');
+  for (const [rel, content] of Object.entries(extra)) writeFile(path.join(data, rel), content);
   for (const rel of omit) fs.rmSync(path.join(data, rel), { recursive: true, force: true });
   if (mtime) {
     fs.utimesSync(path.join(data, 'home/.claude/projects/-config/memory/heating.md'), mtime, mtime);

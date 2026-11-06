@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { isApkName, isPipSpec } = require('./package-names');
 
 const OLD_SLUG_SUFFIX = '_claude_terminal_pro';
 // Options worth carrying over. use_persistent_claude/auto_update_claude_on_start
@@ -60,8 +61,10 @@ async function detect(client, p) {
     version: info.version || old.version || '',
     // info.repository is the store's repository hash; url is the app's homepage.
     repository: info.url || info.repository || '',
-    apk: listOption(options.persistent_apk_packages),
-    pip: listOption(options.persistent_pip_packages),
+    // Only real package names (n30): the dialog shows nothing that would be
+    // skipped, apply checks again (venv names, offers from older versions).
+    apk: listOption(options.persistent_apk_packages).filter(isApkName),
+    pip: listOption(options.persistent_pip_packages).filter(isPipSpec),
     settings: Object.fromEntries(SETTING_KEYS.filter((k) => k in options).map((k) => [k, options[k]])),
   };
   fs.mkdirSync(p.dir, { recursive: true });

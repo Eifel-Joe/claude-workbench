@@ -425,7 +425,7 @@ test('apply: reinstalls packages from old options plus the old venv, records the
   const { result, sup } = await detectThenApply({ ownOptions }, ['packages'], fake.deps);
   assert.equal(result.results.packages, 'ok');
   // One pip call for all; idna is only a dependency (no REQUESTED), so pip pulls it in itself.
-  assert.deepEqual(persistCalls(fake), ['htop', '--python httpx requests']);
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx requests']);
   assert.deepEqual(sup.state.ownOptions.persistent_apk_packages, ['git', 'htop']);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'requests']);
   assert.equal(sup.state.ownOptions.auto_launch_claude, true, 'unrelated own options must survive');
@@ -435,7 +435,7 @@ test('apply: without any REQUESTED marker every venv package is taken', async ()
   const fake = fakePersistInstall(tmp());
   const fixture = { omit: [`${SITE_PACKAGES}/requests-2.32.0.dist-info/REQUESTED`] };
   const { sup } = await detectThenApply({ fixture }, ['packages'], fake.deps);
-  assert.deepEqual(persistCalls(fake), ['htop', '--python httpx idna requests']);
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx idna requests']);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'idna', 'requests']);
 });
 
@@ -443,7 +443,7 @@ test('apply: pip names are compared normalised, the old options spelling wins', 
   const fake = fakePersistInstall(tmp());
   const oldOptions = { ...OLD_OPTIONS, persistent_pip_packages: ['httpx', 'Requests'] };
   const { sup } = await detectThenApply({ oldOptions }, ['packages'], fake.deps);
-  assert.deepEqual(persistCalls(fake), ['htop', '--python httpx Requests']);
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx Requests']);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'Requests']);
 });
 
@@ -452,10 +452,42 @@ test('apply: a failing pip batch is retried one by one, only the good ones are r
   const oldOptions = { ...OLD_OPTIONS, persistent_pip_packages: ['httpx', 'badpy'] };
   const { result, sup } = await detectThenApply({ oldOptions }, ['packages'], fake.deps);
   assert.deepEqual(persistCalls(fake), [
-    'htop', '--python httpx badpy requests', '--python httpx', '--python badpy', '--python requests',
+    '--apk htop', '--python httpx badpy requests', '--python httpx', '--python badpy', '--python requests',
   ]);
   assert.match(result.results.packages, /^error: could not install badpy$/);
   assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'requests']);
+});
+
+// n30: a package name reaches persist-install only after --apk/--python and
+// only if it is one name; a leading - would be a flag, a bare `ha` a mode.
+test('detect: only valid package names reach the offer', async () => {
+  const oldOptions = { ...OLD_OPTIONS, persistent_apk_packages: ['htop', '--ha-cli', 'ha', 'git vim'],
+    persistent_pip_packages: ['httpx', '-r x', 'pandas[all]'] };
+  await withSupervisor({ oldOptions }, async (client, p) => {
+    const { offer } = await detect(client, p);
+    assert.deepEqual(offer.apk, ['htop', 'ha']);
+    assert.deepEqual(offer.pip, ['httpx', 'pandas[all]']);
+  });
+});
+
+test('apply: invalid names from the old venv or an older offer are skipped, not failed', async () => {
+  const fake = fakePersistInstall(tmp());
+  const lines = [];
+  const fixture = { extra: { [`${SITE_PACKAGES}/-evil-1.0.dist-info/REQUESTED`]: '' } };
+  const { result, sup } = await withSupervisor({ oldOptions: OLD_OPTIONS, fixture }, async (client, p, s) => {
+    const { offer } = await detect(client, p);
+    offer.apk.push('--ha-cli'); // written by a version without the check
+    const r = await apply(client, p, offer, ['packages', 'stop'],
+      { today: '2026-10-06', pollMs: 1, log: (l) => lines.push(l), ...fake.deps });
+    return { result: r, sup: s };
+  });
+  assert.deepEqual(persistCalls(fake), ['--apk htop', '--python httpx requests']);
+  assert.equal(result.results.packages, 'ok');
+  assert.equal(result.results.stop, 'ok', 'a skipped name must not keep the old app running');
+  assert.deepEqual(sup.state.ownOptions.persistent_apk_packages, ['htop']);
+  assert.deepEqual(sup.state.ownOptions.persistent_pip_packages, ['httpx', 'requests']);
+  assert.ok(lines.some((l) => l.includes('skipped --ha-cli (not a package name)')), lines.join('\n'));
+  assert.ok(lines.some((l) => l.includes('skipped -evil (not a package name)')), lines.join('\n'));
 });
 
 test('apply: no package installed means this app\'s options are not written', async () => {

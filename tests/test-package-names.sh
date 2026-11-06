@@ -110,4 +110,55 @@ run_case '["git vim"]' ''
 expect_skipped 'git vim'
 grep -q 'one package per entry' "$log" || fail "the warning does not say one package per entry"
 
+# 8. The app takeover checks names with the same rules in JavaScript
+#    (scripts/app-migration/package-names.js). In JS `[]` is an empty class,
+#    so the pip rule cannot be copied verbatim; this table holds both to the
+#    same verdicts. kind|name|1 (valid) or 0.
+js_module="$repo_root/claude-workbench/scripts/app-migration/package-names.js"
+[ -f "$js_module" ] || fail "scripts/app-migration/package-names.js is missing"
+if command -v cygpath > /dev/null 2>&1; then
+    js_module=$(cygpath -m "$js_module")
+fi
+cases=$(cat << 'CASES'
+apk|git|1
+apk|git=2.47.0-r0|1
+apk|cmd:ping|1
+apk|so:libz.so.1|1
+apk|foo@testing|1
+apk|py3-pip|1
+apk|a|1
+apk|ha|1
+apk|--ha-cli|0
+apk|-p|0
+apk|-x foo|0
+apk|git vim|0
+apk|-|0
+apk|pandas[all]|0
+pip|pandas[all]|1
+pip|requests==2.31.0|1
+pip|foo>=1,<2|1
+pip|a|1
+pip|-r req.txt|0
+pip|--index-url=x|0
+pip|-e .|0
+pip|git+https://x/y|0
+pip|requests >= 2|0
+pip|]x|0
+CASES
+)
+while IFS='|' read -r kind name expected; do
+    if [ "$kind" = apk ]; then re="$APK_NAME_RE"; else re="$PIP_SPEC_RE"; fi
+    if [[ "$name" =~ $re ]]; then got_sh=1; else got_sh=0; fi
+    [ "$got_sh" = "$expected" ] || fail "bash judges $kind '$name' as $got_sh, expected $expected"
+done <<< "$cases"
+js_out=$(node -e '
+    const m = require(process.argv[1]);
+    const lines = process.argv[2].split("\n").filter(Boolean);
+    for (const l of lines) {
+        const [kind, name] = l.split("|");
+        const ok = kind === "apk" ? m.isApkName(name) : m.isPipSpec(name);
+        console.log(`${kind}|${name}|${ok ? 1 : 0}`);
+    }' "$js_module" "$cases") || fail "node could not check the names"
+[ "$js_out" = "$cases" ] || fail "JavaScript disagrees with the table: $(diff <(printf '%s\n' "$cases") <(printf '%s\n' "$js_out") | tr '\n' ' ')"
+
 echo "Package name tests passed"
