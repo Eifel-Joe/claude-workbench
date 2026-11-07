@@ -38,6 +38,11 @@ Settings → System → Backups. It includes the old app's image (several hundre
 and the old login, so delete it once you no longer need it. `s` asks again on the
 next start, `n` never asks again.
 
+Without a Claude login in Claude Workbench, the old app's `~/.claude.json` (MCP
+servers, project approvals), `settings.json` and plugin lists replace the ones Claude
+Workbench had written (e.g. when the old app was installed later). Those are kept in
+`/data/migration/replaced/<date>/`.
+
 Coming from this project's old app, the store lists Claude Workbench twice: install
 the one whose app page address ends in `0e003122_claude_workbench` (from the new
 repository URL above). The other one, `6ef0b4d0_claude_workbench`, comes through the

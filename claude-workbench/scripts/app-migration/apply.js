@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { isApkName, isPipSpec } = require('./package-names');
+const { hasOwnClaudeData } = require('./detect');
 
 // Verified on HA-Test (plan Task 0): the partial backup is a tar holding
 // <slug>.tar.gz, whose data/ is the app's /data. That archive also carries
@@ -118,6 +119,75 @@ function copyMissing(src, dst, filter) {
   return true;
 }
 
+// n40: an old app installed after this one is offered only on a later start,
+// when the status line and the plugin have already written Claude's setup
+// files (settings.json, the plugin lists, ~/.claude.json from `claude plugin`)
+// and copyMissing would keep the old ones out. An offer exists only without a
+// login and a project history (detect.js hasOwnClaudeData), so ours hold what
+// this app and the CLI wrote, and the old ones replace them as whole files.
+//   - ~/.claude.json only when the old app has one: without it, a leftover
+//     ~/.claude/backups/.claude.json.backup.* makes every `claude` call warn
+//     (checked with Claude Code 2.1.119).
+//   - settings.json (enabledPlugins, extraKnownMarketplaces), both plugin lists
+//     and our plugin record only together: they are right only as a set, and
+//     without our record the next start sets the plugin up from the old
+//     record (.addon-ha-plugin, n31) or anew (run.sh setup_ha_plugin).
+// Copy first, then swap: a copy failing half-way would otherwise leave Claude
+// without ~/.claude.json or with half a plugin set. Ours are moved, never
+// deleted. Rejected: merging the files or checking whether ours hold only app
+// entries - both read three formats Claude owns and changes (spec 3.6.4 n33,
+// 3.6.5). tests/test-app-migration.js "n40".
+const CLAUDE_JSON = '.claude.json';
+const SETUP_FILES = ['.claude/settings.json', '.claude/plugins/installed_plugins.json',
+  '.claude/plugins/known_marketplaces.json'];
+const PLUGIN_RECORD = '.claude/plugins/.claude-workbench-ha-plugin'; // run.sh setup_ha_plugin, HA_PLUGIN_STATE
+
+// A folder of its own per takeover: one killed after the claude step (before
+// state: done) is offered again, and its second run must not rename over what
+// the first one set aside (review 3.6.5).
+function freeReplacedDir(p, date) {
+  let dir = path.join(p.replaced, date);
+  for (let n = 2; fs.existsSync(dir); n += 1) dir = path.join(p.replaced, `${date}-${n}`);
+  return dir;
+}
+
+// Returns the paths (relative to the home) of ours that were set aside and the
+// folder they went to.
+function setAsideOwnSetup(p, oldHome, date) {
+  const none = { moved: [], kept: '' };
+  if (hasOwnClaudeData(p)) return none;
+  const has = (home, rel) => fs.existsSync(path.join(home, rel));
+  const swap = [];
+  if (has(oldHome, CLAUDE_JSON)) swap.push(CLAUDE_JSON);
+  if (SETUP_FILES.some((rel) => has(oldHome, rel))) swap.push(...SETUP_FILES, PLUGIN_RECORD);
+  if (!swap.some((rel) => has(p.home, rel))) return none; // nothing of ours: copyMissing does it all
+
+  const staged = [];
+  try {
+    for (const rel of swap.filter((r) => has(oldHome, r))) {
+      const tmp = `${path.join(p.home, rel)}.takeover`;
+      fs.mkdirSync(path.dirname(tmp), { recursive: true });
+      staged.push(tmp);
+      fs.cpSync(path.join(oldHome, rel), tmp, { preserveTimestamps: true, verbatimSymlinks: true });
+    }
+  } catch (e) {
+    for (const tmp of staged) fs.rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
+  const kept = freeReplacedDir(p, date);
+  const moved = [];
+  for (const rel of swap) {
+    const own = path.join(p.home, rel);
+    if (fs.existsSync(own)) {
+      fs.mkdirSync(path.dirname(path.join(kept, rel)), { recursive: true });
+      fs.renameSync(own, path.join(kept, rel));
+      moved.push(rel);
+    }
+    if (fs.existsSync(`${own}.takeover`)) fs.renameSync(`${own}.takeover`, own);
+  }
+  return { moved, kept };
+}
+
 const PIP_BOOTSTRAP = new Set(['pip', 'setuptools', 'wheel']);
 const unique = (list) => [...new Set(list)];
 
@@ -201,11 +271,14 @@ async function apply(client, p, offer, selected, deps = {}) {
   }
 
   await step('claude', () => {
-    const found = copyMissing(path.join(oldHome, '.claude'), path.join(p.home, '.claude'),
+    if (!fs.existsSync(path.join(oldHome, '.claude'))) return 'not found';
+    const { moved, kept } = setAsideOwnSetup(p, oldHome, opts.date);
+    if (moved.length) log(`  Replaced this app's own ${moved.join(', ')} (kept in ${kept})`);
+    copyMissing(path.join(oldHome, '.claude'), path.join(p.home, '.claude'),
       (src) => path.basename(src) !== '.credentials.json');
-    if (!found) return 'not found';
     const keptJson = fs.existsSync(path.join(p.home, '.claude.json'));
     copyMissing(path.join(oldHome, '.claude.json'), path.join(p.home, '.claude.json'));
+    if (moved.length) return `ok (replaced this app's own Claude settings, kept in ${kept})`;
     return keptJson ? 'ok (kept existing .claude.json)' : 'ok';
   });
   await step('login', () => (copyMissing(path.join(oldHome, '.claude', '.credentials.json'),

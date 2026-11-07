@@ -40,6 +40,7 @@ test('paths: everything lives under MIGRATION_DATA_ROOT', () => {
   assert.equal(p.offer, path.join('/x', 'migration', 'offer.json'));
   assert.equal(p.state, path.join('/x', 'migration', 'state'));
   assert.equal(p.work, path.join('/x', 'migration', 'work'));
+  assert.equal(p.replaced, path.join('/x', 'migration', 'replaced'));
 });
 
 test('client: get/post return data, backup job flow, download writes the file, errors throw', async () => {
@@ -404,14 +405,125 @@ test('apply: claude step reports a missing source', async () => {
   assert.equal(result.results.claude, 'not found');
 });
 
-test('apply: claude step reports a kept existing .claude.json', async () => {
-  await withSupervisor({ oldOptions: OLD_OPTIONS }, async (client, p) => {
+// n40: the old app was installed after this one, whose status line and plugin
+// had already written Claude's setup files. own: files written in this app's
+// home after detect, before apply ({ rel: content }).
+async function applyOverOwn(fixture, own, selected = ['claude']) {
+  return withSupervisor({ oldOptions: OLD_OPTIONS, fixture }, async (client, p) => {
     const { offer } = await detect(client, p);
-    fs.writeFileSync(path.join(p.home, '.claude.json'), '{"new":true}');
-    const r = await apply(client, p, offer, ['claude'], { today: '2026-10-06', pollMs: 1, log: quiet });
-    assert.equal(r.results.claude, 'ok (kept existing .claude.json)');
-    assert.equal(fs.readFileSync(path.join(p.home, '.claude.json'), 'utf8'), '{"new":true}');
+    for (const [rel, content] of Object.entries(own)) {
+      fs.mkdirSync(path.dirname(path.join(p.home, rel)), { recursive: true });
+      fs.writeFileSync(path.join(p.home, rel), content);
+    }
+    const lines = [];
+    const result = await apply(client, p, offer, selected,
+      { today: '2026-10-06', pollMs: 1, log: (l) => lines.push(l), persistInstall: 'false-bin' });
+    return { result, p, log: lines.join('\n') };
   });
+}
+const readHome = (p, rel) => fs.readFileSync(path.join(p.home, rel), 'utf8');
+const readReplaced = (p, rel) => fs.readFileSync(path.join(p.replaced, '2026-10-06', rel), 'utf8');
+const PLUGIN_RECORD = '.claude/plugins/.claude-workbench-ha-plugin';
+const OWN_SETUP = {
+  '.claude.json': '{"own":true}',
+  '.claude/settings.json': '{"statusLine":{}}',
+  '.claude/plugins/installed_plugins.json': '{"own":"installed"}',
+  '.claude/plugins/known_marketplaces.json': '{"own":"known"}',
+  [PLUGIN_RECORD]: 'true:1.0.0\n',
+};
+const OLD_SETUP = {
+  'home/.claude/settings.json': '{"old":"settings"}',
+  'home/.claude/plugins/installed_plugins.json': '{"old":"installed"}',
+  'home/.claude/plugins/known_marketplaces.json': '{"old":"known"}',
+};
+const takeoverLeftovers = (p) => fs.readdirSync(p.home, { recursive: true }).filter((f) => String(f).endsWith('.takeover'));
+
+test("apply: n40 - the old app's Claude files replace the ones status line and plugin wrote", async () => {
+  const { result, p, log } = await applyOverOwn({ extra: OLD_SETUP }, OWN_SETUP);
+  assert.equal(result.results.claude,
+    `ok (replaced this app's own Claude settings, kept in ${path.join(p.replaced, '2026-10-06')})`);
+  assert.equal(readHome(p, '.claude.json'), '{"oauthAccount":{"email":"x"}}');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"old":"settings"}');
+  assert.equal(readHome(p, '.claude/plugins/installed_plugins.json'), '{"old":"installed"}');
+  assert.equal(readHome(p, '.claude/plugins/known_marketplaces.json'), '{"old":"known"}');
+  assert.equal(fs.existsSync(path.join(p.home, PLUGIN_RECORD)), false);
+  for (const [rel, content] of Object.entries(OWN_SETUP)) assert.equal(readReplaced(p, rel), content, rel);
+  assert.match(log, /Replaced this app's own \.claude\.json, \.claude\/settings\.json, /);
+  assert.deepEqual(takeoverLeftovers(p), []);
+  // the rest of the old ~/.claude still arrives
+  assert.equal(readHome(p, '.claude/CLAUDE.md'), 'old global instructions\n');
+});
+
+test('apply: a second takeover the same day keeps the first one\'s set-aside files', async () => {
+  // An apply killed after the claude step (before state: done) is offered again;
+  // what it set aside the first time must not be overwritten.
+  const { result, p } = await applyOverOwn({ extra: OLD_SETUP },
+    { ...OWN_SETUP, '../migration/replaced/2026-10-06/.claude.json': '{"first":true}' });
+  assert.equal(readReplaced(p, '.claude.json'), '{"first":true}');
+  const second = path.join(p.replaced, '2026-10-06-2');
+  assert.equal(fs.readFileSync(path.join(second, '.claude.json'), 'utf8'), '{"own":true}');
+  assert.equal(result.results.claude, `ok (replaced this app's own Claude settings, kept in ${second})`);
+});
+
+test('apply: an old .claude.json alone replaces only ours', async () => {
+  const { result, p } = await applyOverOwn(undefined, OWN_SETUP);
+  assert.match(result.results.claude, /^ok \(replaced this app's own Claude settings/);
+  assert.equal(readHome(p, '.claude.json'), '{"oauthAccount":{"email":"x"}}');
+  assert.equal(readReplaced(p, '.claude.json'), '{"own":true}');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"statusLine":{}}');
+  assert.equal(readHome(p, PLUGIN_RECORD), 'true:1.0.0\n');
+  assert.equal(fs.existsSync(path.join(p.replaced, '2026-10-06', '.claude')), false);
+});
+
+test('apply: old settings only - our .claude.json stays', async () => {
+  const { p } = await applyOverOwn(
+    { omit: ['home/.claude.json'], extra: { 'home/.claude/settings.json': '{"old":"settings"}' } },
+    { '.claude.json': '{"own":true}', '.claude/settings.json': '{"statusLine":{}}' });
+  assert.equal(readHome(p, '.claude.json'), '{"own":true}');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"old":"settings"}');
+  assert.equal(readReplaced(p, '.claude/settings.json'), '{"statusLine":{}}');
+  assert.equal(fs.existsSync(path.join(p.replaced, '2026-10-06', '.claude.json')), false);
+});
+
+test('apply: own login before the takeover keeps everything', async () => {
+  const { result, p } = await applyOverOwn({ extra: OLD_SETUP },
+    { '.claude/.credentials.json': '{"token":"new"}', '.claude.json': '{"new":true}', '.claude/settings.json': '{"statusLine":{}}' });
+  assert.equal(result.results.claude, 'ok (kept existing .claude.json)');
+  assert.equal(readHome(p, '.claude.json'), '{"new":true}');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"statusLine":{}}');
+  assert.equal(fs.existsSync(p.replaced), false);
+});
+
+test('apply: nothing of ours, nothing set aside', async () => {
+  const { result, p } = await applyOverOwn({ extra: OLD_SETUP }, {});
+  assert.equal(result.results.claude, 'ok');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"old":"settings"}');
+  assert.equal(fs.existsSync(p.replaced), false);
+});
+
+test('apply: no old ~/.claude moves nothing', async () => {
+  const { result, p } = await applyOverOwn({ omit: ['home/.claude'] }, { '.claude/settings.json': '{"statusLine":{}}' });
+  assert.equal(result.results.claude, 'not found');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"statusLine":{}}');
+  assert.equal(fs.existsSync(p.replaced), false);
+});
+
+test('apply: Claude data not selected moves nothing', async () => {
+  const { p } = await applyOverOwn({ extra: OLD_SETUP }, OWN_SETUP, ['gh']);
+  assert.equal(readHome(p, '.claude.json'), '{"own":true}');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"statusLine":{}}');
+  assert.equal(fs.existsSync(p.replaced), false);
+});
+
+test('apply: an old file that cannot be copied leaves ours in place', async () => {
+  // settings.json is a directory in the old app: copying it as a file fails
+  const { result, p } = await applyOverOwn({ extra: { 'home/.claude/settings.json/x': '' } },
+    { '.claude.json': '{"own":true}', '.claude/settings.json': '{"statusLine":{}}' });
+  assert.match(result.results.claude, /^error: /);
+  assert.equal(readHome(p, '.claude.json'), '{"own":true}');
+  assert.equal(readHome(p, '.claude/settings.json'), '{"statusLine":{}}');
+  assert.deepEqual(takeoverLeftovers(p), []);
+  assert.equal(fs.existsSync(p.replaced), false);
 });
 
 test('apply: outer backup.tar is removed before the inner archive is unpacked', async () => {
